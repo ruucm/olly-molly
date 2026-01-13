@@ -7,6 +7,35 @@ struct ServerState {
     server_process: Mutex<Option<Child>>,
 }
 
+fn build_runtime_path() -> String {
+    let mut entries: Vec<String> = Vec::new();
+
+    if let Ok(existing) = std::env::var("PATH") {
+        for entry in existing.split(':') {
+            if !entry.is_empty() && !entries.iter().any(|e| e == entry) {
+                entries.push(entry.to_string());
+            }
+        }
+    }
+
+    let defaults = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ];
+
+    for entry in defaults {
+        if !entries.iter().any(|e| e == entry) {
+            entries.push(entry.to_string());
+        }
+    }
+
+    entries.join(":")
+}
+
 fn find_server_dir(app: &tauri::App) -> Option<PathBuf> {
     // Try resource_dir first (production)
     if let Ok(resource_dir) = app.path().resource_dir() {
@@ -130,12 +159,16 @@ fn start_next_server(server_dir: PathBuf) -> Option<Child> {
     
     let node_path = find_node_binary(&server_dir)?;
     log::info!("Using Node.js from: {:?}", node_path);
+
+    let runtime_path = build_runtime_path();
+    log::info!("Using PATH for server: {}", runtime_path);
     
     let child = Command::new(&node_path)
         .arg(&server_js)
         .current_dir(&server_dir)
         .env("PORT", "1234")
         .env("HOSTNAME", "localhost")
+        .env("PATH", runtime_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
