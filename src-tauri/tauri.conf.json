@@ -6,7 +6,7 @@
   "build": {
     "devUrl": "http://localhost:1234",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": ""
+    "beforeBuildCommand": "node scripts/prepare-tauri-build.js"
   },
   "app": {
     "windows": [
@@ -28,7 +28,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app"],
+    "targets": ["dmg", "app", "nsis", "msi"],
+    "resources": ["server/*", "server/**/*"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

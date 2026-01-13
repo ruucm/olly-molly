@@ -36,14 +36,33 @@ fn find_server_dir(app: &tauri::App) -> Option<PathBuf> {
     None
 }
 
-fn find_node_binary() -> Option<PathBuf> {
-    // Try common Node.js locations on macOS
+fn find_node_binary(server_dir: &PathBuf) -> Option<PathBuf> {
+    let bundled_node = if cfg!(target_os = "windows") {
+        server_dir.join("node.exe")
+    } else {
+        server_dir.join("node")
+    };
+
+    if bundled_node.exists() {
+        log::info!("Found bundled Node.js at: {:?}", bundled_node);
+        return Some(bundled_node);
+    }
+
+    if let Some(node_path) = find_node_in_path() {
+        return Some(node_path);
+    }
+
+    log::error!("Could not find Node.js binary");
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn find_node_in_path() -> Option<PathBuf> {
     let possible_paths = [
-        "/usr/local/bin/node",
-        "/opt/homebrew/bin/node",
-        "/usr/bin/node",
+        r"C:\Program Files\nodejs\node.exe",
+        r"C:\Program Files (x86)\nodejs\node.exe",
     ];
-    
+
     for path in possible_paths {
         let node_path = PathBuf::from(path);
         if node_path.exists() {
@@ -51,20 +70,51 @@ fn find_node_binary() -> Option<PathBuf> {
             return Some(node_path);
         }
     }
-    
-    // Try to find node in PATH using 'which'
-    if let Ok(output) = Command::new("which").arg("node").output() {
+
+    if let Ok(output) = Command::new("where").arg("node").output() {
         if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout);
-            let path = PathBuf::from(path_str.trim());
-            if path.exists() {
-                log::info!("Found Node.js via which: {:?}", path);
-                return Some(path);
+            if let Some(first_line) = String::from_utf8_lossy(&output.stdout).lines().next() {
+                let path = PathBuf::from(first_line.trim());
+                if path.exists() {
+                    log::info!("Found Node.js via where: {:?}", path);
+                    return Some(path);
+                }
             }
         }
     }
-    
-    log::error!("Could not find Node.js binary");
+
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_node_in_path() -> Option<PathBuf> {
+    // Try common Node.js locations on macOS/Linux
+    let possible_paths = [
+        "/usr/local/bin/node",
+        "/opt/homebrew/bin/node",
+        "/usr/bin/node",
+    ];
+
+    for path in possible_paths {
+        let node_path = PathBuf::from(path);
+        if node_path.exists() {
+            log::info!("Found Node.js at: {:?}", node_path);
+            return Some(node_path);
+        }
+    }
+
+    if let Ok(output) = Command::new("which").arg("node").output() {
+        if output.status.success() {
+            if let Some(first_line) = String::from_utf8_lossy(&output.stdout).lines().next() {
+                let path = PathBuf::from(first_line.trim());
+                if path.exists() {
+                    log::info!("Found Node.js via which: {:?}", path);
+                    return Some(path);
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -78,7 +128,7 @@ fn start_next_server(server_dir: PathBuf) -> Option<Child> {
         return None;
     }
     
-    let node_path = find_node_binary()?;
+    let node_path = find_node_binary(&server_dir)?;
     log::info!("Using Node.js from: {:?}", node_path);
     
     let child = Command::new(&node_path)

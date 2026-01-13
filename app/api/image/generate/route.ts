@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateImage, checkComfyServer } from '@/lib/image-client';
-import { loadSettingsFromFile, ImageGeneratorSettings } from '@/app/api/image/settings/route';
+import { ImageGeneratorSettings, loadImageSettingsFromFile } from '@/lib/image-settings';
 
 interface GenerateRequest {
     prompt: string;
@@ -21,7 +21,7 @@ function parseSettings(request: NextRequest): ImageGeneratorSettings | null {
     }
 
     // Fall back to file-based settings (for CLI agent calls)
-    return loadSettingsFromFile();
+    return loadImageSettingsFromFile();
 }
 
 export async function POST(request: NextRequest) {
