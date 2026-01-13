@@ -182,6 +182,59 @@ fn start_next_server(server_dir: PathBuf) -> Option<Child> {
     Some(child)
 }
 
+fn free_port_1234() {
+    #[cfg(target_os = "windows")]
+    {
+        let command = r#"$p = Get-NetTCPConnection -LocalPort 1234 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess; if ($p) { $p | Sort-Object -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; Write-Output ("Stopped PID " + $_) } catch { Write-Output ("Failed to stop PID " + $_ + ": " + $_.Exception.Message) } } }"#;
+        match Command::new("powershell")
+            .args(["-NoProfile", "-Command", command])
+            .output()
+        {
+            Ok(output) => {
+                if !output.stdout.is_empty() {
+                    log::info!(
+                        "Port 1234 cleanup output: {}",
+                        String::from_utf8_lossy(&output.stdout)
+                    );
+                }
+                if !output.stderr.is_empty() {
+                    log::warn!(
+                        "Port 1234 cleanup warnings: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+            Err(err) => {
+                log::warn!("Failed to free port 1234 on Windows: {}", err);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let command = "pids=$(lsof -ti tcp:1234 -sTCP:LISTEN 2>/dev/null); if [ -n \"$pids\" ]; then kill -9 $pids; echo \"killed $pids\"; fi";
+        match Command::new("sh").arg("-c").arg(command).output() {
+            Ok(output) => {
+                if !output.stdout.is_empty() {
+                    log::info!(
+                        "Port 1234 cleanup output: {}",
+                        String::from_utf8_lossy(&output.stdout)
+                    );
+                }
+                if !output.stderr.is_empty() {
+                    log::warn!(
+                        "Port 1234 cleanup warnings: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+            Err(err) => {
+                log::warn!("Failed to free port 1234 on Unix: {}", err);
+            }
+        }
+    }
+}
+
 #[allow(dead_code)]
 fn kill_server(state: &tauri::State<ServerState>) {
     if let Ok(mut server) = state.server_process.lock() {
@@ -214,6 +267,7 @@ pub fn run() {
                 log::info!("Production mode detected, looking for server...");
                 
                 if let Some(server_dir) = find_server_dir(app) {
+                    free_port_1234();
                     let state = app.state::<ServerState>();
                     let mut server = state.server_process.lock().unwrap();
                     *server = start_next_server(server_dir);
