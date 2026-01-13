@@ -32,16 +32,8 @@ function getDb(): DatabaseType {
 
   // Create database connection
   _db = new Database(DB_PATH);
-  
-  // Use WAL mode for better concurrency, but with Windows-friendly settings
   _db.pragma('journal_mode = WAL');
-  _db.pragma('busy_timeout = 10000'); // Wait up to 10 seconds for locks (increased for Windows)
-  _db.pragma('synchronous = NORMAL'); // Balance between safety and performance
-  
-  // Windows-specific: reduce WAL file size to minimize locking issues
-  if (process.platform === 'win32') {
-    _db.pragma('wal_autocheckpoint = 100'); // Checkpoint more frequently on Windows
-  }
+  _db.pragma('busy_timeout = 5000'); // Wait up to 5 seconds for locks
 
   // Initialize schema and run migrations only once
   if (!_initialized) {
