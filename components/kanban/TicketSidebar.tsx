@@ -87,6 +87,7 @@ const roleProfileImages: Record<string, string> = {
     QA: '/profiles/qa.png',
     DEVOPS: '/profiles/devops.png',
     BUG_HUNTER: '/profiles/bughunter.png',
+    VIBE_MENTOR: '/profiles/designer.png',
 };
 
 export function TicketSidebar({

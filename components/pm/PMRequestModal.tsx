@@ -124,6 +124,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         BACKEND_DEV: 'success',
         QA: 'warning',
         DEVOPS: 'default',
+        VIBE_MENTOR: 'info',
     };
 
     const roleLabels: Record<string, string> = {
@@ -131,6 +132,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         BACKEND_DEV: 'Backend',
         QA: 'QA',
         DEVOPS: 'DevOps',
+        VIBE_MENTOR: 'Vibe Mentor',
     };
 
     return (

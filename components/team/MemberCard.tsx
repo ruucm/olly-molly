@@ -31,6 +31,7 @@ const roleImages: Record<string, string> = {
     BACKEND_DEV: '/profiles/dev-backend.png',
     QA: '/profiles/qa.png',
     BUG_HUNTER: '/profiles/dev-bughunter.jpg',
+    VIBE_MENTOR: '/profiles/designer.png',
 };
 
 const roleLabels: Record<string, string> = {
@@ -40,6 +41,7 @@ const roleLabels: Record<string, string> = {
     QA: 'QA Engineer',
     DEVOPS: 'DevOps Engineer',
     BUG_HUNTER: 'Bug Hunter',
+    VIBE_MENTOR: 'Vibe Coding Mentor',
 };
 
 const roleColors: Record<string, 'default' | 'info' | 'success' | 'warning' | 'purple' | 'danger'> = {
@@ -49,6 +51,7 @@ const roleColors: Record<string, 'default' | 'info' | 'success' | 'warning' | 'p
     QA: 'warning',
     DEVOPS: 'default',
     BUG_HUNTER: 'danger',
+    VIBE_MENTOR: 'info',
 };
 
 function getProfileImage(member: Member): string | undefined {

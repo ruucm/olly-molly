@@ -100,7 +100,7 @@ function runMigrations(db: DatabaseType) {
     db.exec('ALTER TABLE members ADD COLUMN is_default INTEGER DEFAULT 0');
 
     // Mark existing default members as is_default = 1
-    const defaultMemberIds = ['pm-001', 'fe-001', 'be-001', 'qa-001', 'devops-001', 'bughunter-001'];
+    const defaultMemberIds = ['pm-001', 'fe-001', 'be-001', 'qa-001', 'devops-001', 'bughunter-001', 'vibe-mentor-001'];
     const placeholders = defaultMemberIds.map(() => '?').join(',');
     db.prepare(`UPDATE members SET is_default = 1 WHERE id IN (${placeholders})`).run(...defaultMemberIds);
     console.log('Migration: Marked default members with is_default = 1');
@@ -140,7 +140,7 @@ function runMigrations(db: DatabaseType) {
         -- Create new table with updated CHECK constraint
         CREATE TABLE IF NOT EXISTS members_new (
           id TEXT PRIMARY KEY,
-          role TEXT NOT NULL CHECK(role IN ('PM', 'FE_DEV', 'BACKEND_DEV', 'QA', 'DEVOPS', 'BUG_HUNTER')),
+          role TEXT NOT NULL CHECK(role IN ('PM', 'FE_DEV', 'BACKEND_DEV', 'QA', 'DEVOPS', 'BUG_HUNTER', 'VIBE_MENTOR')),
           name TEXT NOT NULL,
           avatar TEXT,
           profile_image TEXT,
@@ -187,6 +187,81 @@ function runMigrations(db: DatabaseType) {
 
 When given a bug report, quickly identify the issue, implement a fix, and verify it works correctly.')
     `).run();
+  }
+
+  const vibeMentor = db.prepare("SELECT id FROM members WHERE id = 'vibe-mentor-001'").get();
+  if (!vibeMentor) {
+    console.log('Running migration: Adding Vibe Coding Mentor member');
+
+    const insertVibeMentor = () => {
+      db.prepare(`
+        INSERT OR IGNORE INTO members (id, role, name, avatar, system_prompt, is_default, can_generate_images, can_log_screenshots) VALUES
+        ('vibe-mentor-001', 'VIBE_MENTOR', 'Vibe Coding Mentor', '🎓', '당신은 Vibe Coding Navigator 역할의 멘토입니다. 학생이 코드를 깊이 모르더라도 AI로 소프트웨어를 만드는 과정을 친절히 안내합니다. 복잡한 코드를 학생의 의도에 맞게 쉬운 말로 바꿔 설명합니다.
+
+핵심 목표:
+- 프로젝트 파일을 안내하고 흐름을 파악하게 돕기
+- 코드 질문이 오면 일상적인 비유로 쉽게 설명하기
+- 초보자가 놓치기 쉬운 핵심(예: API 키, 설정 단계)을 먼저 찾아 알려주기
+- 모든 대화와 설명, 기록은 반드시 한국어로 작성하기
+
+운영 절차:
+1. 프로젝트 폴더 구조를 먼저 살펴 전체 흐름을 파악한다
+2. 질문이 들어오면 어려운 용어를 피하고 쉬운 한국어로 설명한다
+3. 놓치기 쉬운 부분을 발견하면 먼저 알려준다
+4. 중요한 Q&A와 설명을 Vibe_Coding_Log.md에 계속 추가한다
+
+로그 규칙:
+- 파일: 프로젝트 루트의 Vibe_Coding_Log.md
+- 형식: [날짜/시간] | 주제 | 질문 | 쉬운 설명
+- 이어서 다음 항목을 한국어로 작성한다:
+  - 학습 내용 요약
+  - 쉬운 설명
+  - 주의사항/놓치지 말 것
+  - 다음 단계
+
+대화 톤:
+- 따뜻하고 응원하는 튜터처럼 말한다
+- 학생이 헷갈려하면 현재 진행 상황을 한국어로 요약해준다', 1, 0, 0)
+      `).run();
+    };
+
+    try {
+      insertVibeMentor();
+    } catch (e) {
+      console.log('Migration: Updating members table for VIBE_MENTOR role');
+      try {
+        db.exec('PRAGMA foreign_keys = OFF;');
+
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS members_new (
+            id TEXT PRIMARY KEY,
+            role TEXT NOT NULL CHECK(role IN ('PM', 'FE_DEV', 'BACKEND_DEV', 'QA', 'DEVOPS', 'BUG_HUNTER', 'VIBE_MENTOR')),
+            name TEXT NOT NULL,
+            avatar TEXT,
+            profile_image TEXT,
+            system_prompt TEXT NOT NULL,
+            is_default INTEGER DEFAULT 0,
+            can_generate_images INTEGER DEFAULT 0,
+            can_log_screenshots INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+
+          INSERT OR IGNORE INTO members_new (id, role, name, avatar, profile_image, system_prompt, is_default, can_generate_images, can_log_screenshots, created_at, updated_at)
+          SELECT id, role, name, avatar, profile_image, system_prompt, is_default, can_generate_images, can_log_screenshots, created_at, updated_at FROM members;
+
+          DROP TABLE members;
+          ALTER TABLE members_new RENAME TO members;
+        `);
+
+        db.exec('PRAGMA foreign_keys = ON;');
+      } catch (innerError) {
+        try { db.exec('PRAGMA foreign_keys = ON;'); } catch { /* ignore */ }
+        console.log('Migration: Table recreation skipped or already done:', innerError);
+      }
+
+      insertVibeMentor();
+    }
   }
 
   const conversationsTable = db.prepare(`
