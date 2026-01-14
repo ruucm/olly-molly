@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { projectService } from '@/lib/db';
 
+export const dynamic = 'force-static';
+
+
 export async function GET() {
     try {
         const project = projectService.getActive();

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ticketService, memberService, projectService } from '@/lib/db';
 import { spawn } from 'child_process';
 
+export const dynamic = 'force-static';
+
+
 /**
  * PM Agent - CLI-powered feature breakdown
  * 

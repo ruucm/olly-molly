@@ -30,7 +30,7 @@ export function ActivityLog({ ticketId }: ActivityLogProps) {
     useEffect(() => {
         async function fetchLogs() {
             try {
-                const res = await fetch(`/api/tickets/${ticketId}/logs`);
+                const res = await fetch(`/api/tickets/logs?ticketId=${encodeURIComponent(ticketId)}`);
                 const data = await res.json();
                 setLogs(data);
             } catch (error) {

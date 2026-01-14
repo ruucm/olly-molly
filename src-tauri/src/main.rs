@@ -2,12 +2,13 @@
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
-use std::io::{Read};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{Manager, State};
 use uuid::Uuid;
 
@@ -240,6 +241,57 @@ fn insert_conversation_message(
     }
     std::thread::sleep(Duration::from_millis(200));
   }
+}
+
+fn append_job_output(
+  db_path: &Path,
+  conversation_id: &str,
+  jobs: &Arc<Mutex<HashMap<String, RunningJobState>>>,
+  job_id: &str,
+  content: &str,
+  message_type: &str,
+) {
+  if content.trim().is_empty() {
+    return;
+  }
+
+  insert_conversation_message(db_path, conversation_id, content, message_type);
+  if let Ok(mut jobs) = jobs.lock() {
+    if let Some(job_state) = jobs.get_mut(job_id) {
+      job_state.job.output.push_str(content);
+    }
+  }
+}
+
+fn flush_streamed_output(
+  force: bool,
+  streamed_buffer: &mut String,
+  last_flush: &mut Instant,
+  db_path: &Path,
+  conversation_id: &str,
+  jobs: &Arc<Mutex<HashMap<String, RunningJobState>>>,
+  job_id: &str,
+) {
+  if streamed_buffer.is_empty() {
+    return;
+  }
+  if !force
+    && streamed_buffer.len() < 200
+    && last_flush.elapsed() < Duration::from_millis(1000)
+  {
+    return;
+  }
+  let chunk = streamed_buffer.clone();
+  streamed_buffer.clear();
+  *last_flush = Instant::now();
+  append_job_output(
+    db_path,
+    conversation_id,
+    jobs,
+    job_id,
+    &chunk,
+    "log",
+  );
 }
 
 fn build_agent_prompt(
@@ -825,28 +877,123 @@ async fn start_agent_job(
   let conversation_id_stderr = conversation_id.clone();
   let jobs_stdout = state.jobs.clone();
   let jobs_stderr = state.jobs.clone();
+  let is_claude_stream = provider == "claude";
 
   std::thread::spawn(move || {
-    let mut reader = stdout;
-    let mut buffer = [0u8; 4096];
-    loop {
-      match reader.read(&mut buffer) {
-        Ok(0) => break,
-        Ok(count) => {
-          let content = String::from_utf8_lossy(&buffer[..count]).to_string();
-          insert_conversation_message(
-            &db_path_stdout,
-            &conversation_id_stdout,
-            &content,
-            "log",
-          );
-          if let Ok(mut jobs) = jobs_stdout.lock() {
-            if let Some(job_state) = jobs.get_mut(&job_id_stdout) {
-              job_state.job.output.push_str(&content);
+    if is_claude_stream {
+      let mut reader = BufReader::new(stdout);
+      let mut line = String::new();
+      let mut streamed_buffer = String::new();
+      let mut last_flush = Instant::now();
+      let mut has_streamed_text = false;
+
+      loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+          Ok(0) => break,
+          Ok(_) => {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+              continue;
             }
+            let parsed: Result<Value, _> = serde_json::from_str(trimmed);
+            if let Ok(value) = parsed {
+              let event_type = value.get("type").and_then(|v| v.as_str());
+              if event_type == Some("stream_event") {
+                let delta_type = value
+                  .get("event")
+                  .and_then(|v| v.get("type"))
+                  .and_then(|v| v.as_str());
+                let text_delta = value
+                  .get("event")
+                  .and_then(|v| v.get("delta"))
+                  .and_then(|v| v.get("type"))
+                  .and_then(|v| v.as_str());
+                if delta_type == Some("content_block_delta") && text_delta == Some("text_delta") {
+                  if let Some(text) = value
+                    .get("event")
+                    .and_then(|v| v.get("delta"))
+                    .and_then(|v| v.get("text"))
+                    .and_then(|v| v.as_str())
+                  {
+                    streamed_buffer.push_str(text);
+                    has_streamed_text = true;
+                    flush_streamed_output(
+                      false,
+                      &mut streamed_buffer,
+                      &mut last_flush,
+                      &db_path_stdout,
+                      &conversation_id_stdout,
+                      &jobs_stdout,
+                      &job_id_stdout,
+                    );
+                    continue;
+                  }
+                }
+              }
+
+              if event_type == Some("result") {
+                if let Some(result) = value.get("result").and_then(|v| v.as_str()) {
+                  if !has_streamed_text {
+                    streamed_buffer.push_str(result);
+                  }
+                  flush_streamed_output(
+                    true,
+                    &mut streamed_buffer,
+                    &mut last_flush,
+                    &db_path_stdout,
+                    &conversation_id_stdout,
+                    &jobs_stdout,
+                    &job_id_stdout,
+                  );
+                  continue;
+                }
+              }
+            }
+
+            streamed_buffer.push_str(trimmed);
+            streamed_buffer.push('\n');
+            flush_streamed_output(
+              true,
+              &mut streamed_buffer,
+              &mut last_flush,
+              &db_path_stdout,
+              &conversation_id_stdout,
+              &jobs_stdout,
+              &job_id_stdout,
+            );
           }
+          Err(_) => break,
         }
-        Err(_) => break,
+      }
+      flush_streamed_output(
+        true,
+        &mut streamed_buffer,
+        &mut last_flush,
+        &db_path_stdout,
+        &conversation_id_stdout,
+        &jobs_stdout,
+        &job_id_stdout,
+      );
+    } else {
+      let mut reader = stdout;
+      let mut buffer = [0u8; 4096];
+      loop {
+        match reader.read(&mut buffer) {
+          Ok(0) => break,
+          Ok(count) => {
+            let content = String::from_utf8_lossy(&buffer[..count]).to_string();
+            append_job_output(
+              &db_path_stdout,
+              &conversation_id_stdout,
+              &jobs_stdout,
+              &job_id_stdout,
+              &content,
+              "log",
+            );
+          }
+          Err(_) => break,
+        }
       }
     }
   });
@@ -859,17 +1006,14 @@ async fn start_agent_job(
         Ok(0) => break,
         Ok(count) => {
           let content = String::from_utf8_lossy(&buffer[..count]).to_string();
-          insert_conversation_message(
+          append_job_output(
             &db_path_stderr,
             &conversation_id_stderr,
+            &jobs_stderr,
+            &job_id_stderr,
             &content,
             "error",
           );
-          if let Ok(mut jobs) = jobs_stderr.lock() {
-            if let Some(job_state) = jobs.get_mut(&job_id_stderr) {
-              job_state.job.output.push_str(&content);
-            }
-          }
         }
         Err(_) => break,
       }

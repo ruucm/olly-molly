@@ -173,7 +173,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
     // Fetch work logs
     useEffect(() => {
         if (ticket && showWorkLogs) {
-            fetch(`/api/tickets/${ticket.id}/work-logs`)
+            fetch(`/api/tickets/work-logs?ticketId=${encodeURIComponent(ticket.id)}`)
                 .then(res => res.json())
                 .then(setWorkLogs)
                 .catch(console.error);

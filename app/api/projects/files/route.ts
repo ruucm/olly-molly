@@ -3,6 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { projectService } from '@/lib/db';
 
+export const dynamic = 'force-static';
+
+
 const SKIP_DIRECTORIES = new Set([
     'node_modules',
     '.git',

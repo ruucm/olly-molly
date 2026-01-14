@@ -8,6 +8,8 @@
 /* Light theme (default) - Minimal cream aesthetic */
 :root,
 [data-theme="light"] {
+  --font-geist-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-geist-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   /* Backgrounds - cream/eggshell tones */
   --bg-primary: #F5F4EE;
   --bg-secondary: #EFEDE5;

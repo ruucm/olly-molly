@@ -4,6 +4,9 @@ import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
 
+export const dynamic = 'force-static';
+
+
 // Custom profiles directory - stored in ~/.olly-molly/custom-profiles/ for persistence across updates
 const CUSTOM_PROFILES_DIR = path.join(os.homedir(), '.olly-molly', 'custom-profiles');
 
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
 
         // Return the path that can be used to access the image
         // Since this is stored outside public folder, we need to serve it via API
-        const imagePath = `/api/members/profile-image/${memberId}`;
+        const imagePath = `/api/members/profile-image?memberId=${encodeURIComponent(memberId)}`;
 
         return NextResponse.json({
             success: true,

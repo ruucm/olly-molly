@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRunningJobs, getJobByTicketId, getJobOutput, cancelJob } from '@/lib/agent-jobs';
 
+export const dynamic = 'force-static';
+
 // Get all running jobs
 export async function GET(request: NextRequest) {
     const url = new URL(request.url);

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ticketService, memberService } from '@/lib/db';
 
+export const dynamic = 'force-static';
+
+
 /**
  * PM Agent API - Create tickets with automatic assignment
  * 

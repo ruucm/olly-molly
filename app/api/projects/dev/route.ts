@@ -5,6 +5,9 @@ import fs from 'fs';
 import os from 'os';
 import { projectService } from '@/lib/db';
 
+export const dynamic = 'force-static';
+
+
 const ROOT_RELATIVE_PATH = '.';
 
 function normalizeRelativePath(relativePath?: string | null): string {

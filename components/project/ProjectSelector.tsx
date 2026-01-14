@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/Input';
 import {
     listProjects,
     createEmptyProject,
-    setActiveProject,
+    setActiveProject as setActiveProjectInStore,
     deleteProject,
     type Project,
 } from '@/lib/tauri-projects';
@@ -136,7 +136,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
 
     const handleSelectProject = async (id: string) => {
         try {
-            await setActiveProject(id);
+            await setActiveProjectInStore(id);
             persistProjectId(id);
             await fetchProjects();
         } catch (err) {

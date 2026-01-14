@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
+export const dynamic = 'force-static';
+
 const execAsync = promisify(exec);
 
 async function checkCommandExists(command: string): Promise<boolean> {

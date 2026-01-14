@@ -4,13 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "build:tauri": "node scripts/tauri-build.js",
     "start": "next start",
     "lint": "eslint",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
-    "tauri:build:mac": "cargo tauri build --target aarch64-apple-darwin && cargo tauri build --target x86_64-apple-darwin",
+    "tauri:build:mac": "node scripts/tauri-build-mac.js",
     "tauri:build:win": "cargo tauri build --target x86_64-pc-windows-msvc"
   },
   "dependencies": {

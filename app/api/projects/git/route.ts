@@ -4,6 +4,9 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 
+export const dynamic = 'force-static';
+
+
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_LOG_LIMIT = 80;

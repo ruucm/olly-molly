@@ -5,6 +5,8 @@ import {
     saveImageSettingsToFile,
 } from '@/lib/image-settings';
 
+export const dynamic = 'force-static';
+
 // GET - Load settings
 export async function GET() {
     try {

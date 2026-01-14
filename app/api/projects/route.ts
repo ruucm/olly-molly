@@ -4,8 +4,22 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-export async function GET() {
+export const dynamic = 'force-static';
+
+
+export async function GET(request: NextRequest) {
     try {
+        const { searchParams } = new URL(request.url);
+        const id = searchParams.get('id');
+
+        if (id) {
+            const project = projectService.getById(id);
+            if (!project) {
+                return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+            }
+            return NextResponse.json(project);
+        }
+
         const projects = projectService.getAll();
         return NextResponse.json(projects);
     } catch (error) {
@@ -78,5 +92,46 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         console.error('Error creating project:', error);
         return NextResponse.json({ error: 'Failed to create project' }, { status: 500 });
+    }
+}
+
+export async function DELETE(request: NextRequest) {
+    try {
+        const { searchParams } = new URL(request.url);
+        const id = searchParams.get('id');
+        if (!id) {
+            return NextResponse.json({ error: 'id is required' }, { status: 400 });
+        }
+
+        const deleted = projectService.delete(id);
+        if (!deleted) {
+            return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+        }
+        return NextResponse.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting project:', error);
+        return NextResponse.json({ error: 'Failed to delete project' }, { status: 500 });
+    }
+}
+
+export async function PATCH(request: NextRequest) {
+    try {
+        const { searchParams } = new URL(request.url);
+        const id = searchParams.get('id');
+        if (!id) {
+            return NextResponse.json({ error: 'id is required' }, { status: 400 });
+        }
+
+        const body = await request.json();
+
+        if (body.is_active) {
+            const project = projectService.setActive(id);
+            return NextResponse.json(project);
+        }
+
+        return NextResponse.json({ error: 'Invalid update' }, { status: 400 });
+    } catch (error) {
+        console.error('Error updating project:', error);
+        return NextResponse.json({ error: 'Failed to update project' }, { status: 500 });
     }
 }

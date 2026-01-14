@@ -3,6 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { projectService } from '@/lib/db';
 
+export const dynamic = 'force-static';
+
+
 const MIME_TYPES: Record<string, string> = {
     png: 'image/png',
     jpg: 'image/jpeg',

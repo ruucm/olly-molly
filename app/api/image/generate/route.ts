@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateImage, checkComfyServer } from '@/lib/image-client';
 import { ImageGeneratorSettings, loadImageSettingsFromFile } from '@/lib/image-settings';
 
+export const dynamic = 'force-static';
+
 interface GenerateRequest {
     prompt: string;
     width?: number;

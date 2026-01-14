@@ -3,6 +3,9 @@ import { ticketService, memberService, projectService, activityService, conversa
 import { startBackgroundJob, AgentProvider } from '@/lib/agent-jobs';
 import { v4 as uuidv4 } from 'uuid';
 
+export const dynamic = 'force-static';
+
+
 interface AgentExecuteRequest {
     ticket_id: string;
     feedback?: string;

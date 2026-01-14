@@ -4,14 +4,18 @@ import { existsSync, readdirSync } from 'fs';
 import path from 'path';
 import os from 'os';
 
+export const dynamic = 'force-static';
+
 const CUSTOM_PROFILES_DIR = path.join(os.homedir(), '.olly-molly', 'custom-profiles');
 
-export async function GET(
-    request: NextRequest,
-    { params }: { params: Promise<{ memberId: string }> }
-) {
+export async function GET(request: NextRequest) {
     try {
-        const { memberId } = await params;
+        const { searchParams } = new URL(request.url);
+        const memberId = searchParams.get('memberId');
+
+        if (!memberId) {
+            return NextResponse.json({ error: 'memberId is required' }, { status: 400 });
+        }
 
         // Find the profile image file for this member
         if (!existsSync(CUSTOM_PROFILES_DIR)) {
