@@ -18,13 +18,13 @@ interface ProjectSelectorProps {
     onProjectChange?: (project: Project | null) => void;
 }
 
-type TabType = 'existing' | 'create';
+type TabType = 'existing' | 'create' | 'empty';
 
 export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
     const [projects, setProjects] = useState<Project[]>([]);
     const [activeProject, setActiveProject] = useState<Project | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState<TabType>('existing');
+    const [activeTab, setActiveTab] = useState<TabType>('empty');
 
     // Existing project form
     const [newPath, setNewPath] = useState('');
@@ -37,6 +37,12 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
     const [createProgress, setCreateProgress] = useState<string | null>(null);
+
+    // Create empty project form
+    const [emptyName, setEmptyName] = useState('');
+    const [emptyParentPath, setEmptyParentPath] = useState('');
+    const [emptyCreating, setEmptyCreating] = useState(false);
+    const [emptyError, setEmptyError] = useState<string | null>(null);
 
     const storageKey = 'olly-active-project-id';
     const getStoredProjectId = () => {
@@ -155,6 +161,43 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         }
     };
 
+    const handleCreateEmptyProject = async () => {
+        if (!emptyName.trim()) return;
+
+        setEmptyCreating(true);
+        setEmptyError(null);
+
+        try {
+            const res = await fetch('/api/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'create_empty',
+                    name: emptyName.trim(),
+                    parentPath: emptyParentPath.trim() || undefined,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok || data.error) {
+                throw new Error(data.error || 'Failed to create project');
+            }
+
+            setEmptyName('');
+            setEmptyParentPath('');
+            await fetchProjects();
+
+            if (data.id) {
+                handleSelectProject(data.id);
+            }
+        } catch (err) {
+            setEmptyError(err instanceof Error ? err.message : 'Failed to create project');
+        } finally {
+            setEmptyCreating(false);
+        }
+    };
+
     const handleSelectProject = async (id: string) => {
         try {
             const res = await fetch(`/api/projects/${id}`, {
@@ -203,6 +246,15 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                     {/* Tabs */}
                     <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
                         <button
+                            onClick={() => setActiveTab('empty')}
+                            className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'empty'
+                                ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                                }`}
+                        >
+                            🗂️ 새 빈 프로젝트
+                        </button>
+                        {/* <button
                             onClick={() => setActiveTab('existing')}
                             className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'existing'
                                 ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
@@ -210,7 +262,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                                 }`}
                         >
                             📂 기존 프로젝트 추가
-                        </button>
+                        </button> */}
                         <button
                             onClick={() => setActiveTab('create')}
                             className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'create'
@@ -223,7 +275,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                     </div>
 
                     {/* Tab Content */}
-                    {activeTab === 'existing' ? (
+                    {activeTab === 'existing' && (
                         <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg space-y-3">
                             <Input
                                 placeholder="/Users/username/my-project"
@@ -249,7 +301,8 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                                 {loading ? '추가 중...' : '프로젝트 추가'}
                             </Button>
                         </div>
-                    ) : (
+                    )}
+                    {activeTab === 'create' && (
                         <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg space-y-3">
                             <p className="text-xs text-[var(--text-muted)]">
                                 Next.js 프로젝트를 ~/Projects/ 폴더에 생성합니다
@@ -279,6 +332,42 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                             </Button>
                             <p className="text-xs text-[var(--text-muted)]">
                                 TypeScript, Tailwind CSS, ESLint, App Router 포함
+                            </p>
+                        </div>
+                    )}
+                    {activeTab === 'empty' && (
+                        <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg space-y-3">
+                            <p className="text-xs text-[var(--text-muted)]">
+                                빈 프로젝트 폴더를 생성하고 등록합니다
+                            </p>
+                            <Input
+                                placeholder="my-new-project"
+                                value={emptyName}
+                                onChange={(e) => setEmptyName(e.target.value.replace(/[^a-zA-Z0-9-_]/g, '-'))}
+                                label="프로젝트 이름"
+                            />
+                            <Input
+                                placeholder="~/Projects (선택사항)"
+                                value={emptyParentPath}
+                                onChange={(e) => setEmptyParentPath(e.target.value)}
+                                label="부모 경로"
+                            />
+                            <p className="text-xs text-[var(--text-muted)]">
+                                📍 경로: {emptyParentPath.trim() || '~/Projects'}/{emptyName || 'project-name'}
+                            </p>
+                            {emptyError && (
+                                <p className="text-sm text-red-400">{emptyError}</p>
+                            )}
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={handleCreateEmptyProject}
+                                disabled={!emptyName.trim() || emptyCreating}
+                            >
+                                {emptyCreating ? '생성 중...' : '📁 빈 프로젝트 생성'}
+                            </Button>
+                            <p className="text-xs text-[var(--text-muted)]">
+                                폴더 생성 후 바로 프로젝트로 등록됩니다
                             </p>
                         </div>
                     )}
