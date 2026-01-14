@@ -79,6 +79,15 @@ That's it. Open `http://localhost:1234` and start managing your AI team.
 npx olly-molly
 ```
 
+On macOS (arm64/x64) and Windows x64, `npx olly-molly` will use prebuilt bundles
+from GitHub Releases when available. Asset naming:
+
+```
+olly-molly-darwin-arm64.tar.gz
+olly-molly-darwin-x64.tar.gz
+olly-molly-win32-x64.tar.gz
+```
+
 ### Or install globally
 
 ```bash
