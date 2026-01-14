@@ -129,40 +129,15 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
     }, [isOpen]);
 
     const handleSave = async () => {
-        if (member) {
-            // If onSave is async/supports capabilities, update it properly
-            // Here we assume onSave handles content update, but for extended props we might need direct API call
-            // or onSave update. Ideally onSave should pass all mutable fields.
-            // For now, let's update capability separately if onSave doesn't support it, 
-            // BUT actually page.tsx handleMemberUpdate only takes systemPrompt.
-            // So we need to do a separate fetch for capability or update handleMemberUpdate.
-            // Let's do a direct fetch here to ensure it works without changing page.tsx signature too much?
-            // Or better, handleMemberUpdate in page.tsx could be flexible.
-            // Let's rely on parallel update for now:
-
-            try {
-                const response = await fetch(`/api/members/${member.id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        system_prompt: prompt,
-                        can_generate_images: canGenerateImages ? 1 : 0,
-                        can_log_screenshots: canLogScreenshots ? 1 : 0
-                    }),
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to update member');
-                }
-
-                const updatedMember = await response.json();
-                onSave(updatedMember);
-                onClose();
-            } catch (error) {
-                console.error('Failed to update member:', error);
-                alert('Failed to update member');
-            }
-        }
+        if (!member) return;
+        const updatedMember: Member = {
+            ...member,
+            system_prompt: prompt,
+            can_generate_images: canGenerateImages ? 1 : 0,
+            can_log_screenshots: canLogScreenshots ? 1 : 0,
+        };
+        await onSave(updatedMember);
+        onClose();
     };
 
     const handleImageClick = () => {
@@ -172,55 +147,13 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
     };
 
     const handleUploadClick = () => {
-        fileInputRef.current?.click();
+        alert('Tauri 모드에서는 프로필 이미지 업로드가 비활성화됩니다.');
     };
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !member) return;
-
-        setIsUploading(true);
-        try {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('memberId', member.id);
-
-            const response = await fetch('/api/members/upload', {
-                method: 'POST',
-                body: formData,
-            });
-
-            const result = await response.json();
-            if (result.success && result.path) {
-                // Add cache-busting query param
-                const newImagePath = `${result.path}?t=${Date.now()}`;
-                setUploadedImage(newImagePath);
-
-                // Update member in database
-                if (onProfileImageChange) {
-                    onProfileImageChange(member.id, result.path);
-                } else {
-                    // Fallback: update via PATCH
-                    await fetch(`/api/members/${member.id}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ profile_image: result.path }),
-                    });
-                }
-            } else {
-                console.error('Upload failed:', result.error);
-                alert('Failed to upload image: ' + (result.error || 'Unknown error'));
-            }
-        } catch (error) {
-            console.error('Upload error:', error);
-            alert('Failed to upload image');
-        } finally {
-            setIsUploading(false);
-            // Reset file input
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
-            }
-        }
+        void e;
+        setIsUploading(false);
+        alert('Tauri 모드에서는 프로필 이미지 업로드가 비활성화됩니다.');
     };
 
     return (

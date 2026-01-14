@@ -10,7 +10,15 @@ import { ProjectSelector, DevServerControl, ProjectArtifactsModal } from '@/comp
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import packageJson from '@/package.json';
-import { createTicket, loadBoardData, type BoardData } from '@/lib/tauri-board';
+import {
+  createMember,
+  createTicket,
+  deleteMember,
+  deleteTicket,
+  loadBoardData,
+  updateMember,
+  updateTicket,
+} from '@/lib/tauri-board';
 import type { Project } from '@/lib/tauri-projects';
 interface Member {
   id: string;
@@ -34,6 +42,7 @@ interface Ticket {
   priority: string;
   assignee_id?: string | null;
   assignee?: Member | null;
+  project_id?: string | null;
 }
 
 export default function Dashboard() {
@@ -50,17 +59,7 @@ export default function Dashboard() {
   const agentFeaturesEnabled = false;
   const devServerEnabled = false;
 
-  const normalizeMembers = useCallback((data: BoardData["members"]): Member[] => {
-    return data.map((member) => ({
-      ...member,
-      system_prompt: '',
-      is_default: 0,
-      can_generate_images: 0,
-      can_log_screenshots: 0,
-    }));
-  }, []);
-
-  const attachAssignees = useCallback((items: BoardData["tickets"], allMembers: Member[]): Ticket[] => {
+  const attachAssignees = useCallback((items: Ticket[], allMembers: Member[]): Ticket[] => {
     const byId = new Map(allMembers.map((member) => [member.id, member]));
     return items.map((ticket) => ({
       ...ticket,
@@ -72,7 +71,7 @@ export default function Dashboard() {
     setLoading(true);
     try {
       const result = await loadBoardData();
-      const hydratedMembers = normalizeMembers(result.data.members);
+      const hydratedMembers = result.data.members;
       const hydratedTickets = attachAssignees(result.data.tickets, hydratedMembers);
       setMembers(hydratedMembers);
       setTickets(hydratedTickets);
@@ -81,7 +80,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [attachAssignees, normalizeMembers]);
+  }, [attachAssignees]);
 
   useEffect(() => {
     refreshBoard();
@@ -105,56 +104,112 @@ export default function Dashboard() {
   }, [attachAssignees, members]);
 
   const handleTicketUpdate = useCallback(async (id: string, data: Partial<Ticket>) => {
+    const existing = tickets.find((ticket) => ticket.id === id);
+    if (!existing) return;
+    const next = { ...existing, ...data };
+
     setTickets((prev) =>
       prev.map((ticket) => {
         if (ticket.id !== id) return ticket;
-        const next = { ...ticket, ...data };
-        if ('assignee_id' in data) {
-          next.assignee = data.assignee_id
-            ? members.find((member) => member.id === data.assignee_id) || null
-            : null;
-        }
-        return next;
+        const assignee =
+          'assignee_id' in data
+            ? data.assignee_id
+              ? members.find((member) => member.id === data.assignee_id) || null
+              : null
+            : ticket.assignee;
+        return { ...next, assignee };
       })
     );
-  }, [members]);
+
+    try {
+      const updated = await updateTicket({
+        id,
+        title: next.title,
+        description: next.description ?? null,
+        status: next.status,
+        priority: next.priority,
+        assignee_id: next.assignee_id ?? null,
+      });
+      setTickets((prev) =>
+        prev.map((ticket) =>
+          ticket.id === id
+            ? {
+                ...ticket,
+                ...updated,
+                assignee: updated.assignee_id
+                  ? members.find((member) => member.id === updated.assignee_id) ||
+                    null
+                  : null,
+              }
+            : ticket
+        )
+      );
+    } catch (error) {
+      console.error('Failed to update ticket:', error);
+    }
+  }, [members, tickets]);
 
   const handleTicketDelete = useCallback(async (id: string) => {
-    setTickets(prev => prev.filter(t => t.id !== id));
+    try {
+      await deleteTicket(id);
+      setTickets(prev => prev.filter(t => t.id !== id));
+    } catch (error) {
+      console.error('Failed to delete ticket:', error);
+    }
   }, []);
 
-  const handleMemberUpdate = useCallback((updatedMember: Member) => {
-    setMembers(prev => prev.map(m => m.id === updatedMember.id ? updatedMember : m));
-    setTickets(prev => prev.map(ticket => (
-      ticket.assignee_id === updatedMember.id
-        ? { ...ticket, assignee: updatedMember }
-        : ticket
-    )));
+  const handleMemberUpdate = useCallback(async (updatedMember: Member) => {
+    try {
+      const saved = await updateMember({
+        id: updatedMember.id,
+        role: updatedMember.role,
+        name: updatedMember.name,
+        avatar: updatedMember.avatar ?? null,
+        profile_image: updatedMember.profile_image ?? null,
+        system_prompt: updatedMember.system_prompt,
+        can_generate_images: updatedMember.can_generate_images,
+        can_log_screenshots: updatedMember.can_log_screenshots,
+        is_default: updatedMember.is_default,
+      });
+      setMembers(prev => prev.map(m => m.id === saved.id ? saved : m));
+      setTickets(prev => prev.map(ticket => (
+        ticket.assignee_id === saved.id
+          ? { ...ticket, assignee: saved }
+          : ticket
+      )));
+    } catch (error) {
+      console.error('Failed to update member:', error);
+    }
   }, []);
 
   const handleMemberCreate = useCallback(async (data: { role: string; name: string; avatar: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean }) => {
-    const id =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? `mem-${crypto.randomUUID()}`
-        : `mem-${Date.now()}`;
-    const newMember: Member = {
-      id,
-      role: data.role,
-      name: data.name,
-      avatar: data.avatar,
-      system_prompt: data.system_prompt,
-      is_default: 0,
-      can_generate_images: data.can_generate_images ? 1 : 0,
-      can_log_screenshots: data.can_log_screenshots ? 1 : 0,
-    };
-    setMembers(prev => [...prev, newMember]);
+    try {
+      const newMember = await createMember({
+        role: data.role,
+        name: data.name,
+        avatar: data.avatar,
+        system_prompt: data.system_prompt,
+        can_generate_images: data.can_generate_images ? 1 : 0,
+        can_log_screenshots: data.can_log_screenshots ? 1 : 0,
+      });
+      setMembers(prev => [...prev, newMember]);
+    } catch (error) {
+      console.error('Failed to create member:', error);
+      alert('Failed to create member. Please try again.');
+    }
   }, []);
 
   const handleMemberDelete = useCallback(async (id: string) => {
-    setMembers(prev => prev.filter(m => m.id !== id));
-    setTickets(prev => prev.map(ticket => (
-      ticket.assignee_id === id ? { ...ticket, assignee_id: null, assignee: null } : ticket
-    )));
+    try {
+      await deleteMember(id);
+      setMembers(prev => prev.filter(m => m.id !== id));
+      setTickets(prev => prev.map(ticket => (
+        ticket.assignee_id === id ? { ...ticket, assignee_id: null, assignee: null } : ticket
+      )));
+    } catch (error) {
+      console.error('Failed to delete member:', error);
+      alert('Failed to delete member. Please try again.');
+    }
   }, []);
 
   const handlePMTicketsCreated = useCallback(() => {
@@ -349,21 +404,24 @@ export default function Dashboard() {
         </aside>
       </div>
 
-      <ProjectArtifactsModal
-        isOpen={artifactsModalOpen}
-        onClose={() => setArtifactsModalOpen(false)}
-        projectId={activeProject?.id || null}
-        projectName={activeProject?.name || null}
-        projectPath={activeProject?.path || null}
-      />
+      {agentFeaturesEnabled && (
+        <ProjectArtifactsModal
+          isOpen={artifactsModalOpen}
+          onClose={() => setArtifactsModalOpen(false)}
+          projectId={activeProject?.id || null}
+          projectName={activeProject?.name || null}
+          projectPath={activeProject?.path || null}
+        />
+      )}
 
-      {/* PM Request Modal */}
-      <PMRequestModal
-        isOpen={pmModalOpen}
-        onClose={() => setPmModalOpen(false)}
-        onTicketsCreated={handlePMTicketsCreated}
-        projectId={activeProject?.id}
-      />
+      {agentFeaturesEnabled && (
+        <PMRequestModal
+          isOpen={pmModalOpen}
+          onClose={() => setPmModalOpen(false)}
+          onTicketsCreated={handlePMTicketsCreated}
+          projectId={activeProject?.id}
+        />
+      )}
 
 
 

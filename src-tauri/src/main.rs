@@ -18,6 +18,11 @@ struct Member {
   role: String,
   name: String,
   avatar: Option<String>,
+  profile_image: Option<String>,
+  system_prompt: String,
+  is_default: i64,
+  can_generate_images: i64,
+  can_log_screenshots: i64,
 }
 
 #[derive(Serialize)]
@@ -28,6 +33,7 @@ struct Ticket {
   status: String,
   priority: String,
   assignee_id: Option<String>,
+  project_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -52,6 +58,39 @@ struct CreateTicketInput {
   priority: Option<String>,
   #[serde(alias = "assigneeId")]
   assignee_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateTicketInput {
+  id: String,
+  title: String,
+  description: Option<String>,
+  status: String,
+  priority: String,
+  assignee_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateMemberInput {
+  role: String,
+  name: String,
+  avatar: Option<String>,
+  profile_image: Option<String>,
+  system_prompt: String,
+  can_generate_images: i64,
+  can_log_screenshots: i64,
+}
+
+#[derive(Deserialize)]
+struct UpdateMemberInput {
+  id: String,
+  role: String,
+  name: String,
+  avatar: Option<String>,
+  profile_image: Option<String>,
+  system_prompt: String,
+  can_generate_images: i64,
+  can_log_screenshots: i64,
 }
 
 #[derive(Deserialize)]
@@ -134,14 +173,61 @@ fn get_active_project(conn: &Connection) -> Result<Option<Project>, String> {
   Ok(None)
 }
 
+fn get_member_by_id(conn: &Connection, id: &str) -> Result<Option<Member>, String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, role, name, avatar, profile_image, system_prompt, is_default, can_generate_images, can_log_screenshots FROM members WHERE id = ?1",
+    )
+    .map_err(|err| err.to_string())?;
+  let mut rows = stmt.query([id]).map_err(|err| err.to_string())?;
+  if let Some(row) = rows.next().map_err(|err| err.to_string())? {
+    return Ok(Some(Member {
+      id: row.get(0).map_err(|err| err.to_string())?,
+      role: row.get(1).map_err(|err| err.to_string())?,
+      name: row.get(2).map_err(|err| err.to_string())?,
+      avatar: row.get(3).map_err(|err| err.to_string())?,
+      profile_image: row.get(4).map_err(|err| err.to_string())?,
+      system_prompt: row.get(5).map_err(|err| err.to_string())?,
+      is_default: row.get(6).map_err(|err| err.to_string())?,
+      can_generate_images: row.get(7).map_err(|err| err.to_string())?,
+      can_log_screenshots: row.get(8).map_err(|err| err.to_string())?,
+    }));
+  }
+  Ok(None)
+}
+
+fn get_ticket_by_id(conn: &Connection, id: &str) -> Result<Option<Ticket>, String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, title, description, status, priority, assignee_id, project_id FROM tickets WHERE id = ?1",
+    )
+    .map_err(|err| err.to_string())?;
+  let mut rows = stmt.query([id]).map_err(|err| err.to_string())?;
+  if let Some(row) = rows.next().map_err(|err| err.to_string())? {
+    return Ok(Some(Ticket {
+      id: row.get(0).map_err(|err| err.to_string())?,
+      title: row.get(1).map_err(|err| err.to_string())?,
+      description: row.get(2).map_err(|err| err.to_string())?,
+      status: row.get(3).map_err(|err| err.to_string())?,
+      priority: row.get(4).map_err(|err| err.to_string())?,
+      assignee_id: row.get(5).map_err(|err| err.to_string())?,
+      project_id: row.get(6).map_err(|err| err.to_string())?,
+    }));
+  }
+  Ok(None)
+}
+
 #[tauri::command]
 fn get_board_data(state: State<AppState>) -> Result<BoardData, String> {
   let conn = Connection::open(&state.db_path).map_err(|err| err.to_string())?;
 
-  let mut member_stmt =
-    conn
-      .prepare("SELECT id, role, name, avatar FROM members ORDER BY is_default DESC, name ASC")
-      .map_err(|err| err.to_string())?;
+  let active_project = get_active_project(&conn)?;
+
+  let mut member_stmt = conn
+    .prepare(
+      "SELECT id, role, name, avatar, profile_image, system_prompt, is_default, can_generate_images, can_log_screenshots FROM members ORDER BY is_default DESC, name ASC",
+    )
+    .map_err(|err| err.to_string())?;
   let members = member_stmt
     .query_map([], |row| {
       Ok(Member {
@@ -149,6 +235,11 @@ fn get_board_data(state: State<AppState>) -> Result<BoardData, String> {
         role: row.get(1)?,
         name: row.get(2)?,
         avatar: row.get(3)?,
+        profile_image: row.get(4)?,
+        system_prompt: row.get(5)?,
+        is_default: row.get(6)?,
+        can_generate_images: row.get(7)?,
+        can_log_screenshots: row.get(8)?,
       })
     })
     .map_err(|err| err.to_string())?
@@ -157,23 +248,27 @@ fn get_board_data(state: State<AppState>) -> Result<BoardData, String> {
 
   let mut ticket_stmt = conn
     .prepare(
-      "SELECT id, title, description, status, priority, assignee_id FROM tickets ORDER BY updated_at DESC",
+      "SELECT id, title, description, status, priority, assignee_id, project_id FROM tickets WHERE project_id = ?1 ORDER BY updated_at DESC",
     )
     .map_err(|err| err.to_string())?;
-  let tickets = ticket_stmt
-    .query_map([], |row| {
-      Ok(Ticket {
-        id: row.get(0)?,
-        title: row.get(1)?,
-        description: row.get(2)?,
-        status: row.get(3)?,
-        priority: row.get(4)?,
-        assignee_id: row.get(5)?,
+  let tickets = match active_project {
+    Some(project) => ticket_stmt
+      .query_map([project.id], |row| {
+        Ok(Ticket {
+          id: row.get(0)?,
+          title: row.get(1)?,
+          description: row.get(2)?,
+          status: row.get(3)?,
+          priority: row.get(4)?,
+          assignee_id: row.get(5)?,
+          project_id: row.get(6)?,
+        })
       })
-    })
-    .map_err(|err| err.to_string())?
-    .collect::<Result<Vec<Ticket>, rusqlite::Error>>()
-    .map_err(|err| err.to_string())?;
+      .map_err(|err| err.to_string())?
+      .collect::<Result<Vec<Ticket>, rusqlite::Error>>()
+      .map_err(|err| err.to_string())?,
+    None => Vec::new(),
+  };
 
   Ok(BoardData { members, tickets })
 }
@@ -338,6 +433,11 @@ fn create_ticket(
   input: CreateTicketInput,
 ) -> Result<Ticket, String> {
   let conn = Connection::open(&state.db_path).map_err(|err| err.to_string())?;
+  let active_project = get_active_project(&conn)?;
+  let project_id = match active_project {
+    Some(project) => Some(project.id),
+    None => return Err("No active project selected".to_string()),
+  };
 
   let id = format!("tck-{}", Uuid::new_v4());
   let status = "TODO".to_string();
@@ -345,7 +445,7 @@ fn create_ticket(
 
   conn
     .execute(
-      "INSERT INTO tickets (id, title, description, status, priority, assignee_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+      "INSERT INTO tickets (id, title, description, status, priority, assignee_id, project_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
       (
         &id,
         &input.title,
@@ -353,6 +453,7 @@ fn create_ticket(
         &status,
         &priority,
         &input.assignee_id,
+        &project_id,
       ),
     )
     .map_err(|err| err.to_string())?;
@@ -364,7 +465,109 @@ fn create_ticket(
     status,
     priority,
     assignee_id: input.assignee_id,
+    project_id,
   })
+}
+
+#[tauri::command]
+fn update_ticket(state: State<AppState>, input: UpdateTicketInput) -> Result<Ticket, String> {
+  let conn = Connection::open(&state.db_path).map_err(|err| err.to_string())?;
+
+  conn
+    .execute(
+      "UPDATE tickets SET title = ?1, description = ?2, status = ?3, priority = ?4, assignee_id = ?5, updated_at = CURRENT_TIMESTAMP WHERE id = ?6",
+      (
+        &input.title,
+        &input.description,
+        &input.status,
+        &input.priority,
+        &input.assignee_id,
+        &input.id,
+      ),
+    )
+    .map_err(|err| err.to_string())?;
+
+  match get_ticket_by_id(&conn, &input.id)? {
+    Some(ticket) => Ok(ticket),
+    None => Err("Ticket not found".to_string()),
+  }
+}
+
+#[tauri::command]
+fn delete_ticket(state: State<AppState>, id: String) -> Result<(), String> {
+  let conn = Connection::open(&state.db_path).map_err(|err| err.to_string())?;
+  conn
+    .execute("DELETE FROM tickets WHERE id = ?1", [&id])
+    .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
+fn create_member(state: State<AppState>, input: CreateMemberInput) -> Result<Member, String> {
+  let conn = Connection::open(&state.db_path).map_err(|err| err.to_string())?;
+  let id = format!("mem-{}", Uuid::new_v4());
+
+  conn
+    .execute(
+      "INSERT INTO members (id, role, name, avatar, profile_image, system_prompt, is_default, can_generate_images, can_log_screenshots) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
+      (
+        &id,
+        &input.role,
+        &input.name,
+        &input.avatar,
+        &input.profile_image,
+        &input.system_prompt,
+        &input.can_generate_images,
+        &input.can_log_screenshots,
+      ),
+    )
+    .map_err(|err| err.to_string())?;
+
+  match get_member_by_id(&conn, &id)? {
+    Some(member) => Ok(member),
+    None => Err("Member not found after insert".to_string()),
+  }
+}
+
+#[tauri::command]
+fn update_member(state: State<AppState>, input: UpdateMemberInput) -> Result<Member, String> {
+  let conn = Connection::open(&state.db_path).map_err(|err| err.to_string())?;
+
+  conn
+    .execute(
+      "UPDATE members SET role = ?1, name = ?2, avatar = ?3, profile_image = ?4, system_prompt = ?5, can_generate_images = ?6, can_log_screenshots = ?7, updated_at = CURRENT_TIMESTAMP WHERE id = ?8",
+      (
+        &input.role,
+        &input.name,
+        &input.avatar,
+        &input.profile_image,
+        &input.system_prompt,
+        &input.can_generate_images,
+        &input.can_log_screenshots,
+        &input.id,
+      ),
+    )
+    .map_err(|err| err.to_string())?;
+
+  match get_member_by_id(&conn, &input.id)? {
+    Some(member) => Ok(member),
+    None => Err("Member not found".to_string()),
+  }
+}
+
+#[tauri::command]
+fn delete_member(state: State<AppState>, id: String) -> Result<(), String> {
+  let conn = Connection::open(&state.db_path).map_err(|err| err.to_string())?;
+  conn
+    .execute(
+      "UPDATE tickets SET assignee_id = NULL WHERE assignee_id = ?1",
+      [&id],
+    )
+    .map_err(|err| err.to_string())?;
+  conn
+    .execute("DELETE FROM members WHERE id = ?1", [&id])
+    .map_err(|err| err.to_string())?;
+  Ok(())
 }
 
 fn main() {
@@ -382,6 +585,11 @@ fn main() {
     .invoke_handler(tauri::generate_handler![
       get_board_data,
       create_ticket,
+      update_ticket,
+      delete_ticket,
+      create_member,
+      update_member,
+      delete_member,
       list_projects,
       create_empty_project,
       set_active_project,
