@@ -13,6 +13,11 @@ npm install
 echo "Building Next.js..."
 npm run build
 
+STANDALONE_STATIC="${ROOT_DIR}/.next/standalone/.next/static"
+rm -rf "${STANDALONE_STATIC}"
+mkdir -p "$(dirname "${STANDALONE_STATIC}")"
+cp -R "${ROOT_DIR}/.next/static" "${STANDALONE_STATIC}"
+
 ARCH="$(uname -m)"
 case "${ARCH}" in
   arm64) ARCH_TAG="arm64" ;;
@@ -26,7 +31,6 @@ TARBALL="${OUT_DIR}/olly-molly-darwin-${ARCH_TAG}.tar.gz"
 echo "Packaging ${TARBALL}..."
 tar -czf "${TARBALL}" \
   .next/standalone \
-  .next/static \
   package.json \
   public
 
