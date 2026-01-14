@@ -1,64 +1,32 @@
 {
-  "name": "olly-molly",
-  "version": "0.2.17",
-  "description": "Your AI Development Team, Running Locally - Manage AI agents (PM, Frontend, Backend, QA) from a beautiful kanban board",
-  "keywords": [
-    "ai",
-    "development",
-    "team",
-    "kanban",
-    "agents",
-    "local",
-    "cli"
-  ],
-  "author": "ruucm",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ruucm/olly-molly.git"
-  },
-  "homepage": "https://github.com/ruucm/olly-molly#readme",
-  "bugs": {
-    "url": "https://github.com/ruucm/olly-molly/issues"
-  },
-  "bin": {
-    "olly-molly": "bin/cli.js"
-  },
-  "files": [
-    "bin"
-  ],
+  "name": "olly-molly-tauri",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
-    "dev": "next dev --port 1234",
+    "dev": "next dev",
     "build": "next build",
-    "start": "next start --port 1234",
-    "lint": "eslint"
+    "build:tauri": "node scripts/tauri-build.js",
+    "start": "next start",
+    "lint": "eslint",
+    "tauri:dev": "cargo tauri dev",
+    "tauri:build": "cargo tauri build",
+    "tauri:build:mac": "cargo tauri build --target aarch64-apple-darwin && cargo tauri build --target x86_64-apple-darwin",
+    "tauri:build:win": "cargo tauri build --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@dnd-kit/sortable": "^10.0.0",
-    "@dnd-kit/utilities": "^3.2.2",
-    "@tailwindcss/postcss": "^4",
-    "better-sqlite3": "^12.5.0",
+    "@tauri-apps/api": "^2.0.0",
     "next": "16.1.1",
     "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "swr": "^2.3.8",
-    "tailwindcss": "^4",
-    "uuid": "^13.0.0"
+    "react-dom": "19.2.3"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "20.19.29",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/uuid": "^10.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
-    "typescript": "5.9.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }

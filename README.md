@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app-icon.png" width="80" height="80" alt="Olly Molly">
+  <img src="./src-tauri/icons/icon.png" width="80" height="80" alt="Olly Molly">
 </p>
 
 <h1 align="center">Olly Molly</h1>

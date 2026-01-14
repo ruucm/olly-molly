@@ -1,0 +1,31 @@
+{
+  "productName": "Olly Molly",
+  "identifier": "com.ollymolly.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build:tauri",
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../out"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Yongmin Ji (NAN24D758Z)",
+      "providerShortName": "NAN24D758Z"
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Olly Molly",
+        "width": 1400,
+        "height": 900,
+        "resizable": true
+      }
+    ]
+  }
+}
