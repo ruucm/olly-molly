@@ -1,0 +1,5 @@
+{
+  "provider": "off",
+  "comfyuiServerUrl": "http://localhost:8188",
+  "geminiApiKey": ""
+}

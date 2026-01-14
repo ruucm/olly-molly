@@ -1,21 +1,41 @@
-import type { TextareaHTMLAttributes } from "react";
+'use client';
 
-type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
-  label?: string;
-};
+import { TextareaHTMLAttributes, forwardRef } from 'react';
 
-export function Textarea({ label, className = "", ...props }: TextareaProps) {
-  return (
-    <label className="block space-y-2">
-      {label ? (
-        <span className="text-sm font-semibold text-[var(--ink)]">
-          {label}
-        </span>
-      ) : null}
-      <textarea
-        className={`w-full rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)] ${className}`}
-        {...props}
-      />
-    </label>
-  );
+interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+    label?: string;
+    error?: string;
 }
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
+    ({ className = '', label, error, ...props }, ref) => {
+        return (
+            <div className="w-full">
+                {label && (
+                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5 uppercase tracking-wide">
+                        {label}
+                    </label>
+                )}
+                <textarea
+                    ref={ref}
+                    className={`
+                        w-full px-3 py-2 text-sm
+                        bg-transparent text-[var(--text-primary)]
+                        border border-[var(--border-primary)]
+                        placeholder:text-[var(--text-muted)] 
+                        transition-colors duration-150 resize-none
+                        focus:outline-none focus:border-[var(--text-primary)]
+                        ${error ? 'border-[var(--priority-high-text)]' : ''}
+                        ${className}
+                    `}
+                    {...props}
+                />
+                {error && (
+                    <p className="mt-1 text-xs text-[var(--priority-high-text)]">{error}</p>
+                )}
+            </div>
+        );
+    }
+);
+
+Textarea.displayName = 'Textarea';

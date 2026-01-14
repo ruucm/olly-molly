@@ -47,3 +47,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SQLite database (each user has their own local DB)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+db/*.sqlite
+db/*.sqlite-shm
+db/*.sqlite-wal
+
+# Sensitive configuration files
+db/image-settings.json
+
+dist

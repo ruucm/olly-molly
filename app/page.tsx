@@ -1,411 +1,411 @@
-"use client";
+'use client';
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
-import {
-  createTicket,
-  loadBoardData,
-  type BoardData,
-  type BoardLoadResult,
-} from "@/lib/tauri-board";
-import { ProjectSelector } from "@/components/project/ProjectSelector";
-import { TicketSidebar } from "@/components/kanban/TicketSidebar";
-import type { Project } from "@/lib/tauri-projects";
+import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
+import { KanbanBoard, TicketSidebar } from '@/components/kanban';
+import { TeamPanel } from '@/components/team';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { PMRequestModal } from '@/components/pm';
+import { ProjectSelector, DevServerControl, ProjectArtifactsModal } from '@/components/project';
+import { Button } from '@/components/ui/Button';
+import { ResizablePane } from '@/components/ui/ResizablePane';
+import packageJson from '@/package.json';
 
-const columns = [
-  { key: "TODO", label: "Todo" },
-  { key: "IN_PROGRESS", label: "In Progress" },
-  { key: "IN_REVIEW", label: "In Review" },
-  { key: "NEED_FIX", label: "Need Fix" },
-  { key: "COMPLETE", label: "Complete" },
-  { key: "ON_HOLD", label: "On Hold" },
-];
+import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
+import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
 
-const priorityTone: Record<string, string> = {
-  LOW: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  MEDIUM: "bg-amber-50 text-amber-700 border-amber-200",
-  HIGH: "bg-orange-50 text-orange-800 border-orange-200",
-  CRITICAL: "bg-rose-50 text-rose-700 border-rose-200",
-};
+interface RunningJob {
+  id: string;
+  ticketId: string;
+  agentName: string;
+  status: 'running' | 'completed' | 'failed';
+}
+interface Member {
+  id: string;
+  role: string;
+  name: string;
+  avatar?: string | null;
+  profile_image?: string | null; // Added based on common pattern for avatar/profile_image
+  system_prompt: string;
+  is_default: number;
+  can_generate_images: number; // Added as per instruction
+  can_log_screenshots: number;
+  created_at?: string; // Added based on common pattern for timestamps
+  updated_at?: string; // Added based on common pattern for timestamps
+}
 
-export default function Home() {
-  const [boardData, setBoardData] = useState<BoardData>({
-    members: [],
-    tickets: [],
-  });
-  const [dataSource, setDataSource] = useState<BoardLoadResult["source"]>("seed");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [isComposerOpen, setIsComposerOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+interface Ticket {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  priority: string;
+  assignee_id?: string | null;
+  assignee?: Member | null;
+}
+
+interface Project {
+  id: string;
+  name: string;
+  path: string;
+  is_active: number;
+}
+
+export default function Dashboard() {
+  const [members, setMembers] = useState<Member[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pmModalOpen, setPmModalOpen] = useState(false);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
-  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
-  const [formState, setFormState] = useState({
-    title: "",
-    description: "",
-    priority: "MEDIUM",
-    assignee_id: "",
-  });
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [ticketSidebarOpen, setTicketSidebarOpen] = useState(false);
+  const [artifactsModalOpen, setArtifactsModalOpen] = useState(false);
 
-  const assigneeOptions = useMemo(
-    () =>
-      boardData.members.map((member) => ({
-        id: member.id,
-        label: member.name,
-      })),
-    [boardData.members]
-  );
+  const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
+  const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
+  const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
+  const appVersion = packageJson.version;
 
-  const selectedTicket =
-    boardData.tickets.find((ticket) => ticket.id === selectedTicketId) || null;
 
+
+  // Check for CLI tools on mount
   useEffect(() => {
-    let isMounted = true;
-
-    loadBoardData().then((result) => {
-      if (!isMounted) return;
-      setBoardData(result.data);
-      setDataSource(result.source);
-      setLoadError(result.error ?? null);
-    });
-
-    return () => {
-      isMounted = false;
-    };
+    fetch('/api/check-cli')
+      .then(res => res.json())
+      .then(data => {
+        if (!data.anyInstalled) {
+          setCliWarningModalOpen(true);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to check CLI installation:', err);
+      });
   }, []);
 
-  const resetForm = () => {
-    setFormState({
-      title: "",
-      description: "",
-      priority: "MEDIUM",
-      assignee_id: "",
-    });
-    setSubmitError(null);
-  };
+  // Poll for running jobs
+  useEffect(() => {
+    const fetchRunningJobs = async () => {
+      try {
+        const res = await fetch('/api/agent/status');
+        const data = await res.json();
+        setRunningJobs(data.jobs || []);
+      } catch (error) {
+        console.error('Failed to fetch running jobs:', error);
+      }
+    };
+    fetchRunningJobs();
+    const interval = setInterval(fetchRunningJobs, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!formState.title.trim()) {
-      setSubmitError("Title is required.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    setSubmitError(null);
-
+  // Fetch data
+  const fetchData = useCallback(async (projectId?: string) => {
     try {
-      const ticket = await createTicket({
-        title: formState.title.trim(),
-        description: formState.description.trim() || undefined,
-        priority: formState.priority,
-        assignee_id: formState.assignee_id || undefined,
-      });
-
-      setBoardData((prev) => ({
-        ...prev,
-        tickets: [ticket, ...prev.tickets],
-      }));
-
-      setIsComposerOpen(false);
-      resetForm();
+      const ticketUrl = projectId
+        ? `/api/tickets?projectId=${projectId}`
+        : '/api/tickets';
+      const [membersRes, ticketsRes] = await Promise.all([
+        fetch('/api/members'),
+        fetch(ticketUrl),
+      ]);
+      const [membersData, ticketsData] = await Promise.all([
+        membersRes.json(),
+        ticketsRes.json(),
+      ]);
+      setMembers(membersData);
+      setTickets(ticketsData);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error ?? "");
-      setSubmitError(message || "Failed to create ticket.");
+      console.error('Failed to fetch data:', error);
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData(activeProject?.id);
+  }, [fetchData, activeProject]);
+
+  const handleTicketCreate = useCallback(async (data: Partial<Ticket>) => {
+    try {
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...data,
+          project_id: activeProject?.id,
+        }),
+      });
+      const newTicket = await res.json();
+      setTickets(prev => [newTicket, ...prev]);
+      return newTicket as Ticket;
+    } catch (error) {
+      console.error('Failed to create ticket:', error);
+      return null;
+    }
+  }, [activeProject]);
+
+  const handleTicketUpdate = useCallback(async (id: string, data: Partial<Ticket>) => {
+    try {
+      const res = await fetch(`/api/tickets/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const updatedTicket = await res.json();
+      setTickets(prev => prev.map(t => t.id === id ? updatedTicket : t));
+    } catch (error) {
+      console.error('Failed to update ticket:', error);
+    }
+  }, []);
+
+  const handleTicketDelete = useCallback(async (id: string) => {
+    try {
+      await fetch(`/api/tickets/${id}`, { method: 'DELETE' });
+      setTickets(prev => prev.filter(t => t.id !== id));
+    } catch (error) {
+      console.error('Failed to delete ticket:', error);
+    }
+  }, []);
+
+  const handleMemberUpdate = useCallback((updatedMember: Member) => {
+    setMembers(prev => prev.map(m => m.id === updatedMember.id ? updatedMember : m));
+  }, []);
+
+  const handleMemberCreate = useCallback(async (data: { role: string; name: string; avatar: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean }) => {
+    try {
+      const res = await fetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const newMember = await res.json();
+      setMembers(prev => [...prev, newMember]);
+    } catch (error) {
+      console.error('Failed to create member:', error);
+      alert('Failed to create member. Please try again.');
+    }
+  }, []);
+
+  const handleMemberDelete = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/members/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        alert(error.error || 'Failed to delete member');
+        return;
+      }
+      setMembers(prev => prev.filter(m => m.id !== id));
+    } catch (error) {
+      console.error('Failed to delete member:', error);
+      alert('Failed to delete member. Please try again.');
+    }
+  }, []);
+
+  const handlePMTicketsCreated = useCallback(() => {
+    fetchData(activeProject?.id); // Refresh all data for current project
+  }, [fetchData, activeProject]);
+
+  const handleProjectChange = useCallback((project: Project | null) => {
+    setActiveProject(project);
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    fetchData(activeProject?.id);
+  }, [fetchData, activeProject]);
+
+
+
+  const handleCreateTicket = async () => {
+    const newTicket = await handleTicketCreate({
+      title: 'New Ticket',
+      status: 'TODO',
+      priority: 'MEDIUM'
+    });
+    if (newTicket) {
+      setSelectedTicket(newTicket);
+      setTicketSidebarOpen(true);
     }
   };
+
+  const runningCount = runningJobs.filter(j => j.status === 'running').length;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-6 h-6 border-2 border-[var(--text-primary)] border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-[var(--text-muted)]">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fef6ea,_#f7f4ef_55%,_#efe7dc)] text-[var(--ink)]">
-      <header className="relative overflow-hidden border-b border-[var(--border)] bg-[var(--paper)]">
-        <div className="paper-grid absolute inset-0 opacity-70" />
-        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-10 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">
-              Olly Molly Control Desk
-            </p>
-            <h1 className="text-4xl font-semibold tracking-tight md:text-5xl">
-              Your Local AI Team !, Focused and Visible.
-            </h1>
-            <p className="max-w-xl text-base leading-7 text-[var(--muted)]">
-              Kanban grounded in the project schema: tickets, priorities, and
-              agent assignments stay aligned from planning to ship.
-            </p>
+    <div className="min-h-screen bg-[var(--bg-primary)]">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-[var(--bg-primary)] border-b border-[var(--border-primary)]">
+        <div className="px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Image
+              src="/app-icon.png"
+              alt="Olly Molly"
+              width={28}
+              height={28}
+              className="opacity-80"
+            />
+            <h1 className="text-sm font-medium text-[var(--text-primary)]">Olly Molly</h1>
+            <span className="text-[10px] text-[var(--text-muted)]" title={`Version ${appVersion}`}>
+              v{appVersion}
+            </span>
+            {runningCount > 0 && (
+              <span className="flex items-center gap-1.5 text-xs text-[var(--status-progress-text)]">
+                <span className="w-1.5 h-1.5 bg-[var(--status-progress-text)] rounded-full gentle-pulse" />
+                {runningCount} working
+              </span>
+            )}
           </div>
-          <div className="flex flex-wrap gap-3">
-            <ProjectSelector onProjectChange={setActiveProject} />
-            <button
-              className="rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-              onClick={() => setIsComposerOpen(true)}
+          <div className="flex items-center gap-2">
+            <ProjectSelector onProjectChange={handleProjectChange} />
+            <DevServerControl projectId={activeProject?.id || null} projectName={activeProject?.name || null} />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setArtifactsModalOpen(true)}
             >
-              New Ticket
+              파일 탐색
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPmModalOpen(true)}
+            >
+              PM 요청
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCreateTicket}
+            >
+              + New
+            </Button>
+            <button
+              onClick={() => setImageSettingsModalOpen(true)}
+              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              title="이미지 생성 설정"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+            <ThemeToggle />
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d={sidebarOpen
+                    ? "M11 19l-7-7 7-7m8 14l-7-7 7-7"
+                    : "M13 5l7 7-7 7M5 5l7 7-7 7"} />
+              </svg>
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
-        <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-[var(--border)] bg-white/70 px-6 py-5 shadow-sm backdrop-blur">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold">Active Agents</h2>
-            <p className="text-sm text-[var(--muted)]">
-              Default team members from the schema.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {boardData.members.map((member) => (
-              <div
-                key={member.id}
-                className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--paper)] px-3 py-1.5 text-sm font-medium text-[var(--ink)]"
-              >
-                <span className="rounded-full border border-[var(--border)] bg-white px-2 py-1 text-[11px] font-semibold">
-                  {member.avatar ?? member.role}
-                </span>
-                <span>{member.name}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--border)] bg-[var(--paper)] px-5 py-3 text-sm text-[var(--muted)]">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-            <span className="font-semibold text-[var(--ink)]">
-              {dataSource === "tauri" ? "Tauri backend connected" : "Local preview"}
-            </span>
-          </div>
-          <span className="font-mono uppercase tracking-[0.2em] text-[10px]">
-            {dataSource === "tauri" ? "sqlite" : "seed"}
-          </span>
-        </section>
-
-        {loadError ? (
-          <section className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700">
-            Backend unavailable: {loadError}
-          </section>
-        ) : null}
-
-        <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-semibold">Kanban Board</h2>
-            <div className="flex items-center gap-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted)]">
-              <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-              Schema-aligned statuses
-            </div>
-          </div>
-
-          <div className="flex gap-4 overflow-x-auto pb-6">
-            {columns.map((column) => {
-              const columnTickets = boardData.tickets.filter(
-                (ticket) => ticket.status === column.key
-              );
-
-              return (
-                <div
-                  key={column.key}
-                  className="flex min-w-[260px] flex-1 flex-col gap-4 rounded-3xl border border-[var(--border)] bg-[var(--paper)] p-4 shadow-sm"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
-                      <span>{column.label}</span>
-                    </div>
-                    <span className="rounded-full border border-[var(--border)] bg-white px-2 py-1 text-xs font-semibold text-[var(--muted)]">
-                      {columnTickets.length}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col gap-3">
-                    {columnTickets.map((ticket) => {
-                      const assignee = boardData.members.find(
-                        (member) => member.id === ticket.assignee_id
-                      );
-
-                      return (
-                        <article
-                          key={ticket.id}
-                          className="cursor-pointer rounded-2xl border border-[var(--border)] bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                          onClick={() => setSelectedTicketId(ticket.id)}
-                        >
-                          <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
-                            <span>{ticket.id}</span>
-                            <span
-                              className={`rounded-full border px-2 py-1 text-[10px] ${priorityTone[ticket.priority]}`}
-                            >
-                              {ticket.priority}
-                            </span>
-                          </div>
-                          <h3 className="mt-3 text-base font-semibold text-[var(--ink)]">
-                            {ticket.title}
-                          </h3>
-                          <p className="mt-2 text-sm text-[var(--muted)]">
-                            {ticket.description}
-                          </p>
-                          <div className="mt-4 flex items-center justify-between text-xs text-[var(--muted)]">
-                            <span className="rounded-full border border-[var(--border)] bg-[var(--paper)] px-2 py-1 font-mono">
-                              {ticket.status}
-                            </span>
-                            <span className="flex items-center gap-2 font-medium text-[var(--ink)]">
-                              <span className="rounded-full border border-[var(--border)] bg-[var(--paper)] px-2 py-1 text-[11px] font-semibold">
-                                {assignee?.avatar}
-                              </span>
-                              {assignee?.name}
-                            </span>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      </main>
-
-      {isComposerOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-6 py-10">
-          <div className="w-full max-w-xl rounded-3xl border border-[var(--border)] bg-[var(--paper)] p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">
-                  New Ticket
-                </p>
-                <h3 className="text-2xl font-semibold text-[var(--ink)]">
-                  Create a focused task
-                </h3>
-              </div>
-              <button
-                className="rounded-full border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold text-[var(--muted)]"
-                onClick={() => {
-                  setIsComposerOpen(false);
-                  resetForm();
+      {/* Main Content */}
+      <div className="flex h-[calc(100vh-45px)]">
+        <ResizablePane
+          defaultLeftWidth={ticketSidebarOpen ? 55 : 100}
+          minLeftWidth={30}
+          minRightWidth={25}
+          left={
+            <div className="h-full overflow-auto">
+              <KanbanBoard
+                tickets={tickets}
+                members={members}
+                onTicketCreate={handleTicketCreate}
+                onTicketUpdate={handleTicketUpdate}
+                onTicketDelete={handleTicketDelete}
+                onTicketsReorder={setTickets}
+                hasActiveProject={!!activeProject}
+                onRefresh={handleRefresh}
+                onTicketSelect={(ticket) => {
+                  setSelectedTicket(ticket);
+                  setTicketSidebarOpen(true);
                 }}
-              >
-                Close
-              </button>
+              />
             </div>
-
-            <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-[var(--ink)]">
-                  Title
-                </label>
-                <input
-                  className="w-full rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
-                  placeholder="Describe the task"
-                  value={formState.title}
-                  onChange={(event) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      title: event.target.value,
-                    }))
-                  }
-                />
+          }
+          right={
+            ticketSidebarOpen && selectedTicket ? (
+              <TicketSidebar
+                isOpen={ticketSidebarOpen}
+                onClose={() => {
+                  setTicketSidebarOpen(false);
+                  setSelectedTicket(null);
+                }}
+                ticket={selectedTicket}
+                members={members}
+                onTicketUpdate={handleTicketUpdate}
+                onTicketDelete={handleTicketDelete}
+                hasActiveProject={!!activeProject}
+              />
+            ) : (
+              <div className="h-full bg-secondary border-l border-primary flex items-center justify-center text-muted">
+                <p>Select a ticket to view details</p>
               </div>
+            )
+          }
+        />
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-[var(--ink)]">
-                  Description
-                </label>
-                <textarea
-                  className="h-24 w-full resize-none rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
-                  placeholder="Context or acceptance notes"
-                  value={formState.description}
-                  onChange={(event) =>
-                    setFormState((prev) => ({
-                      ...prev,
-                      description: event.target.value,
-                    }))
-                  }
-                />
-              </div>
+        {/* Team Sidebar */}
+        <aside className={`
+          fixed right-0 top-[45px] bottom-0 w-1/2 bg-[var(--bg-secondary)] border-l border-[var(--border-primary)]
+          p-4 transition-transform duration-200 overflow-hidden z-20
+          ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}
+        `}>
+          <TeamPanel
+            members={members}
+            onUpdateMember={handleMemberUpdate}
+            onCreateMember={handleMemberCreate}
+            onDeleteMember={handleMemberDelete}
+          />
+        </aside>
+      </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-[var(--ink)]">
-                    Priority
-                  </label>
-                  <select
-                    className="w-full rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
-                    value={formState.priority}
-                    onChange={(event) =>
-                      setFormState((prev) => ({
-                        ...prev,
-                        priority: event.target.value,
-                      }))
-                    }
-                  >
-                    {Object.keys(priorityTone).map((priority) => (
-                      <option key={priority} value={priority}>
-                        {priority}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-[var(--ink)]">
-                    Assignee
-                  </label>
-                  <select
-                    className="w-full rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
-                    value={formState.assignee_id}
-                    onChange={(event) =>
-                      setFormState((prev) => ({
-                        ...prev,
-                        assignee_id: event.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">Unassigned</option>
-                    {assigneeOptions.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+      <ProjectArtifactsModal
+        isOpen={artifactsModalOpen}
+        onClose={() => setArtifactsModalOpen(false)}
+        projectId={activeProject?.id || null}
+        projectName={activeProject?.name || null}
+        projectPath={activeProject?.path || null}
+      />
 
-              {submitError ? (
-                <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
-                  {submitError}
-                </p>
-              ) : null}
+      {/* PM Request Modal */}
+      <PMRequestModal
+        isOpen={pmModalOpen}
+        onClose={() => setPmModalOpen(false)}
+        onTicketsCreated={handlePMTicketsCreated}
+        projectId={activeProject?.id}
+      />
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <p className="text-xs text-[var(--muted)]">
-                  New tickets start in TODO.
-                </p>
-                <button
-                  className="rounded-full bg-[var(--accent)] px-6 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isSubmitting}
-                  type="submit"
-                >
-                  {isSubmitting ? "Creating..." : "Create Ticket"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
 
-      <TicketSidebar
-        isOpen={Boolean(selectedTicket)}
-        onClose={() => setSelectedTicketId(null)}
-        ticket={selectedTicket}
-        members={boardData.members}
-        activeProject={activeProject}
-        onTicketUpdate={(id, data) =>
-          setBoardData((prev) => ({
-            ...prev,
-            tickets: prev.tickets.map((ticket) =>
-              ticket.id === id ? { ...ticket, ...data } : ticket
-            ),
-          }))
-        }
+
+      {/* CLI Warning Modal */}
+      <CLIWarningModal
+        isOpen={cliWarningModalOpen}
+        onClose={() => setCliWarningModalOpen(false)}
+      />
+
+      {/* Image Settings Modal */}
+      <ImageSettingsModal
+        isOpen={imageSettingsModalOpen}
+        onClose={() => setImageSettingsModalOpen(false)}
       />
     </div>
   );
