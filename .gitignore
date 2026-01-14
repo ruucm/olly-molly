@@ -50,3 +50,6 @@ db/*.sqlite-wal
 
 # Sensitive configuration files
 db/image-settings.json
+
+
+dist

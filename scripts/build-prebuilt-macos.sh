@@ -13,9 +13,6 @@ npm install
 echo "Building Next.js..."
 npm run build
 
-echo "Pruning dev dependencies..."
-npm prune --omit=dev
-
 ARCH="$(uname -m)"
 case "${ARCH}" in
   arm64) ARCH_TAG="arm64" ;;
@@ -28,10 +25,9 @@ TARBALL="${OUT_DIR}/olly-molly-darwin-${ARCH_TAG}.tar.gz"
 
 echo "Packaging ${TARBALL}..."
 tar -czf "${TARBALL}" \
-  .next \
-  node_modules \
+  .next/standalone \
+  .next/static \
   package.json \
-  public \
-  next.config.js
+  public
 
 echo "Done: ${TARBALL}"

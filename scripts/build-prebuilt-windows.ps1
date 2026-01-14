@@ -7,7 +7,7 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Set-Location $RootDir
 
 Write-Host "Installing dependencies..."
-npm install --omit=dev
+npm install
 
 Write-Host "Building Next.js..."
 npm run build
@@ -17,10 +17,9 @@ $Tarball = Join-Path $OutDir "olly-molly-win32-x64.tar.gz"
 
 Write-Host "Packaging $Tarball..."
 tar -czf $Tarball `
-  .next `
-  node_modules `
+  .next/standalone `
+  .next/static `
   package.json `
-  public `
-  next.config.js
+  public
 
 Write-Host "Done: $Tarball"

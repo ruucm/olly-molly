@@ -202,9 +202,23 @@ async function main() {
         } catch {}
     }, 2000);
 
-    const server = spawn('npx', ['next', 'start', '--port', '1234'], {
-        cwd: APP_DIR, stdio: 'inherit', shell: true
-    });
+    let server;
+    if (usedPrebuilt) {
+        const serverPath = path.join(APP_DIR, '.next', 'standalone', 'server.js');
+        if (!fs.existsSync(serverPath)) {
+            throw new Error('Prebuilt bundle missing .next/standalone/server.js');
+        }
+        server = spawn('node', [serverPath], {
+            cwd: APP_DIR,
+            stdio: 'inherit',
+            env: { ...process.env, PORT: '1234' },
+            shell: true
+        });
+    } else {
+        server = spawn('npx', ['next', 'start', '--port', '1234'], {
+            cwd: APP_DIR, stdio: 'inherit', shell: true
+        });
+    }
 
     server.on('close', (code) => process.exit(code || 0));
     process.on('SIGINT', () => server.kill('SIGINT'));
