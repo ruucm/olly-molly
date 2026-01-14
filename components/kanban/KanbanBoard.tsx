@@ -16,6 +16,7 @@ import {
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
 import { KanbanColumn } from './KanbanColumn';
 import { TicketCard } from './TicketCard';
+import { getAgentStatus } from '@/lib/tauri-agent';
 
 interface Member {
     id: string;
@@ -40,9 +41,9 @@ interface Ticket {
 
 interface RunningJob {
     id: string;
-    ticketId: string;
-    agentName: string;
-    status: 'running' | 'completed' | 'failed';
+    ticket_id: string;
+    agent_name: string;
+    status: 'running' | 'completed' | 'failed' | 'cancelled';
 }
 
 interface KanbanBoardProps {
@@ -87,8 +88,7 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
         if (disableAgentStatus) return;
         const fetchRunningJobs = async () => {
             try {
-                const res = await fetch('/api/agent/status');
-                const data = await res.json();
+                const data = await getAgentStatus();
                 setRunningJobs(data.jobs || []);
 
                 // If any job just completed, refresh the board
@@ -107,7 +107,7 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
     }, [onRefresh, disableAgentStatus]);
 
     const isTicketRunning = useCallback((ticketId: string) => {
-        return runningJobs.some(job => job.ticketId === ticketId && job.status === 'running');
+        return runningJobs.some(job => job.ticket_id === ticketId && job.status === 'running');
     }, [runningJobs]);
 
     const handleDragStart = (event: DragStartEvent) => {
@@ -184,7 +184,7 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
                             icon={column.icon}
                             tickets={tickets.filter(t => t.status === column.id)}
                             onTicketClick={handleTicketClick}
-                            runningTicketIds={runningJobs.filter(j => j.status === 'running').map(j => j.ticketId)}
+                            runningTicketIds={runningJobs.filter(j => j.status === 'running').map(j => j.ticket_id)}
                         />
                     ))}
                 </div>

@@ -8,7 +8,8 @@ import { Select } from '@/components/ui/Select';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
 import type { Conversation, ConversationMessage } from '@/lib/db';
-import type { AgentProvider } from '@/lib/agent-jobs';
+import type { AgentProvider } from '@/lib/tauri-agent';
+import { cancelAgentJob, getAgentStatus, getConversation, listConversations, startAgentJob } from '@/lib/tauri-agent';
 
 interface Member {
     id: string;
@@ -149,6 +150,20 @@ export function TicketSidebar({
         }
     }, [ticket?.id]);
 
+    useEffect(() => {
+        if (!agentFeaturesEnabled || !ticket?.id) return;
+        getAgentStatus({ ticketId: ticket.id })
+            .then((data) => {
+                if (data.job?.status === 'running') {
+                    setCurrentJobId(data.job.id);
+                    setExecuting(true);
+                }
+            })
+            .catch((error) => {
+                console.error('Failed to fetch agent status:', error);
+            });
+    }, [agentFeaturesEnabled, ticket?.id]);
+
     // Fetch conversations when ticket changes
     useEffect(() => {
         if (!agentFeaturesEnabled) {
@@ -164,13 +179,12 @@ export function TicketSidebar({
 
         const fetchConversations = async () => {
             try {
-                const res = await fetch(`/api/conversations?ticket_id=${ticket.id}`);
-                const data = await res.json();
-                setConversations(data.conversations || []);
+                const items = await listConversations(ticket.id);
+                setConversations(items || []);
 
                 // Auto-select the most recent conversation if none selected
-                if (!selectedConversationId && data.conversations?.length > 0) {
-                    setSelectedConversationId(data.conversations[0].id);
+                if (!selectedConversationId && items?.length > 0) {
+                    setSelectedConversationId(items[0].id);
                 }
             } catch (error) {
                 console.error('Failed to fetch conversations:', error);
@@ -201,8 +215,7 @@ export function TicketSidebar({
             if (isCancelled) return;
 
             try {
-                const res = await fetch(`/api/conversations/${selectedConversationId}`);
-                const data = await res.json();
+                const data = await getConversation(selectedConversationId);
 
                 if (isCancelled) return;
 
@@ -219,15 +232,12 @@ export function TicketSidebar({
                     // If conversation just completed (was running, now not), refresh ticket status
                     if (wasRunning && ticket && !isCancelled) {
                         wasRunning = false;
-                        // Fetch updated ticket status
-                        const ticketRes = await fetch(`/api/tickets/${ticket.id}`);
-                        const ticketData = await ticketRes.json();
-                        if (ticketData.status && !isCancelled) {
-                            setStatus(ticketData.status);
-                            onTicketUpdate(ticket.id, { status: ticketData.status });
+                        const conversationStatus = data.conversation?.status;
+                        if (conversationStatus === 'completed' && !isCancelled) {
+                            setStatus('IN_REVIEW');
+                            onTicketUpdate(ticket.id, { status: 'IN_REVIEW' });
 
-                            // Show web notification when agent completes work
-                            if (ticketData.status === 'IN_REVIEW' && ticket.assignee) {
+                            if (ticket.assignee) {
                                 const agentName = ticket.assignee.name;
                                 const agentIcon = roleProfileImages[ticket.assignee.role] || '/app-icon.png';
                                 showNotification(
@@ -290,47 +300,22 @@ export function TicketSidebar({
 
         try {
             await persistTicketDetails();
-            const res = await fetch('/api/agent/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ticket_id: ticket.id,
-                    feedback: feedback.trim() || undefined,
-                    provider,
-                }),
+            const result = await startAgentJob({
+                ticketId: ticket.id,
+                feedback: feedback.trim() || undefined,
+                provider,
             });
 
-            const data = await res.json();
+            setCurrentJobId(result.job_id);
+            setSelectedConversationId(result.conversation_id);
+            setStatus('IN_PROGRESS');
+            onTicketUpdate(ticket.id, { status: 'IN_PROGRESS' });
 
-            if (data.success) {
-                // Save job ID for stop functionality
-                if (data.job_id) {
-                    setCurrentJobId(data.job_id);
-                }
+            const items = await listConversations(ticket.id);
+            setConversations(items || []);
 
-                // Refresh conversations to include the new one
-                const convRes = await fetch(`/api/conversations?ticket_id=${ticket.id}`);
-                const convData = await convRes.json();
-                setConversations(convData.conversations || []);
-
-                // Select the new conversation
-                if (data.conversation_id) {
-                    setSelectedConversationId(data.conversation_id);
-                }
-
-                // Clear feedback
-                setFeedback('');
-
-                // Update ticket status locally and in parent
-                setStatus('IN_PROGRESS');
-                onTicketUpdate(ticket.id, { status: 'IN_PROGRESS' });
-
-                // Close agent controls after execution
-                setShowAgentControls(false);
-            } else {
-                alert(data.error || 'Failed to start agent');
-                setExecuting(false);
-            }
+            setFeedback('');
+            setShowAgentControls(false);
         } catch (error) {
             alert('Failed to start agent: ' + String(error));
             setExecuting(false);
@@ -342,18 +327,14 @@ export function TicketSidebar({
         if (!currentJobId) return;
 
         try {
-            const res = await fetch(`/api/agent/status?job_id=${currentJobId}`, {
-                method: 'DELETE',
-            });
-            const data = await res.json();
-
-            if (data.success) {
+            const cancelled = await cancelAgentJob(currentJobId);
+            if (cancelled) {
                 setExecuting(false);
                 setCurrentJobId(null);
-                // Refresh conversations to show cancelled status
-                const convRes = await fetch(`/api/conversations?ticket_id=${ticket?.id}`);
-                const convData = await convRes.json();
-                setConversations(convData.conversations || []);
+                if (ticket?.id) {
+                    const items = await listConversations(ticket.id);
+                    setConversations(items || []);
+                }
             }
         } catch (error) {
             console.error('Failed to stop job:', error);

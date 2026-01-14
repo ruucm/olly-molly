@@ -15,6 +15,7 @@ import {
   createTicket,
   deleteMember,
   deleteTicket,
+  isTauriRuntime,
   loadBoardData,
   updateMember,
   updateTicket,
@@ -56,7 +57,7 @@ export default function Dashboard() {
   const [ticketSidebarOpen, setTicketSidebarOpen] = useState(false);
   const [artifactsModalOpen, setArtifactsModalOpen] = useState(false);
   const appVersion = packageJson.version;
-  const agentFeaturesEnabled = false;
+  const [agentFeaturesEnabled, setAgentFeaturesEnabled] = useState(false);
   const devServerEnabled = false;
 
   const attachAssignees = useCallback((items: Ticket[], allMembers: Member[]): Ticket[] => {
@@ -65,6 +66,10 @@ export default function Dashboard() {
       ...ticket,
       assignee: ticket.assignee_id ? byId.get(ticket.assignee_id) || null : null,
     }));
+  }, []);
+
+  useEffect(() => {
+    isTauriRuntime().then(setAgentFeaturesEnabled).catch(() => setAgentFeaturesEnabled(false));
   }, []);
 
   const refreshBoard = useCallback(async () => {
