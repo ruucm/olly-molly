@@ -3,6 +3,11 @@ const nextConfig = {
   /* config options here */
   devIndicators: false,
   output: "standalone",
+  outputFileTracingExcludes: {
+    "*": [
+      "dist/**",
+    ],
+  },
 };
 
 module.exports = nextConfig;
