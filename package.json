@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "dev": "next dev --port 1234",
-    "build": "next build --webpack",
+    "build": "next build",
     "start": "next start --port 1234",
     "lint": "eslint",
     "tauri": "tauri",
@@ -55,13 +55,13 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.6",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^20",
+    "@types/node": "20.19.29",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
-    "typescript": "^5"
+    "typescript": "5.9.3"
   },
   "engines": {
     "node": ">=18.0.0"
