@@ -9,6 +9,7 @@ import { PMRequestModal } from '@/components/pm';
 import { ProjectSelector, DevServerControl, ProjectArtifactsModal } from '@/components/project';
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
+import packageJson from '@/package.json';
 
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
 import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
@@ -64,6 +65,7 @@ export default function Dashboard() {
   const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
+  const appVersion = packageJson.version;
 
 
 
@@ -255,6 +257,9 @@ export default function Dashboard() {
               className="opacity-80"
             />
             <h1 className="text-sm font-medium text-[var(--text-primary)]">Olly Molly</h1>
+            <span className="text-[10px] text-[var(--text-muted)]" title={`Version ${appVersion}`}>
+              v{appVersion}
+            </span>
             {runningCount > 0 && (
               <span className="flex items-center gap-1.5 text-xs text-[var(--status-progress-text)]">
                 <span className="w-1.5 h-1.5 bg-[var(--status-progress-text)] rounded-full gentle-pulse" />
