@@ -10,7 +10,8 @@ const PACKAGE_NAME = 'olly-molly';
 const REPO = 'ruucm/olly-molly';
 const APP_DIR = path.join(os.homedir(), '.olly-molly');
 const DB_DIR = path.join(APP_DIR, 'db');
-const TARBALL_URL = `https://github.com/${REPO}/archive/refs/heads/main.tar.gz`;
+const SOURCE_TARBALL_URL = `https://github.com/${REPO}/archive/refs/heads/main.tar.gz`;
+const RELEASE_BASE_URL = `https://github.com/${REPO}/releases/download`;
 
 console.log('\n🐙 Olly Molly\n');
 
@@ -31,23 +32,49 @@ function getNpmVersion() {
     });
 }
 
-function download(url, destDir) {
+function getPrebuiltUrl(version) {
+    if (!version) return null;
+    const platform = process.platform;
+    const arch = process.arch;
+
+    if (platform === 'darwin' && (arch === 'arm64' || arch === 'x64')) {
+        return `${RELEASE_BASE_URL}/v${version}/olly-molly-darwin-${arch}.tar.gz`;
+    }
+    if (platform === 'win32' && arch === 'x64') {
+        return `${RELEASE_BASE_URL}/v${version}/olly-molly-win32-${arch}.tar.gz`;
+    }
+    return null;
+}
+
+function download(url, destDir, { allowNotFound = false, stripComponents = 1 } = {}) {
     return new Promise((resolve, reject) => {
         const tmp = path.join(os.tmpdir(), 'olly-molly.tar.gz');
         const file = fs.createWriteStream(tmp);
+        const cleanupTmp = () => {
+            try { file.close(); } catch {}
+            try { fs.unlinkSync(tmp); } catch {}
+        };
         const get = (u) => {
             https.get(u, (res) => {
                 if (res.statusCode === 302 || res.statusCode === 301) return get(res.headers.location);
-                if (res.statusCode !== 200) return reject(new Error('Download failed'));
+                if (res.statusCode !== 200) {
+                    cleanupTmp();
+                    if (allowNotFound && res.statusCode === 404) return resolve(false);
+                    return reject(new Error(`Download failed (${res.statusCode})`));
+                }
                 res.pipe(file);
                 file.on('finish', () => {
                     file.close();
                     fs.mkdirSync(destDir, { recursive: true });
-                    execSync(`tar -xzf "${tmp}" -C "${destDir}" --strip-components=1`, { stdio: 'pipe' });
+                    const stripArg = stripComponents > 0 ? ` --strip-components=${stripComponents}` : '';
+                    execSync(`tar -xzf "${tmp}" -C "${destDir}"${stripArg}`, { stdio: 'pipe' });
                     fs.unlinkSync(tmp);
-                    resolve();
+                    resolve(true);
                 });
-            }).on('error', reject);
+            }).on('error', (err) => {
+                cleanupTmp();
+                reject(err);
+            });
         };
         get(url);
     });
@@ -110,9 +137,23 @@ function restoreUserData(backupDir) {
 async function main() {
     let needsInstall = false;
     let needsBuild = false;
+    let usedPrebuilt = false;
 
     const localVersion = getLocalVersion();
     const npmVersion = await getNpmVersion();
+    const prebuiltUrl = getPrebuiltUrl(npmVersion);
+
+    async function downloadApp() {
+        if (prebuiltUrl) {
+            const ok = await download(prebuiltUrl, APP_DIR, { allowNotFound: true, stripComponents: 0 });
+            if (ok) {
+                usedPrebuilt = true;
+                return;
+            }
+        }
+        await download(SOURCE_TARBALL_URL, APP_DIR, { stripComponents: 1 });
+        usedPrebuilt = false;
+    }
 
     // Update if npm version is newer
     if (localVersion && npmVersion && localVersion !== npmVersion) {
@@ -120,20 +161,20 @@ async function main() {
         const userDataBackup = backupUserData();
         fs.rmSync(APP_DIR, { recursive: true, force: true });
         console.log('📥 Downloading...');
-        await download(TARBALL_URL, APP_DIR);
+        await downloadApp();
         console.log('✅ Downloaded\n');
         restoreUserData(userDataBackup);
-        needsInstall = true;
-        needsBuild = true;
+        needsInstall = !usedPrebuilt;
+        needsBuild = !usedPrebuilt;
     }
 
     // First time
     if (!fs.existsSync(APP_DIR)) {
         console.log('📥 Downloading...');
-        await download(TARBALL_URL, APP_DIR);
+        await downloadApp();
         console.log('✅ Downloaded\n');
-        needsInstall = true;
-        needsBuild = true;
+        needsInstall = !usedPrebuilt;
+        needsBuild = !usedPrebuilt;
     }
 
     // Install
