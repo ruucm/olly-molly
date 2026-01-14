@@ -6,9 +6,10 @@ interface DevServerControlProps {
     projectId: string | null;
     projectName: string | null;
     relativePath?: string | null;
+    disabled?: boolean;
 }
 
-export function DevServerControl({ projectId, projectName, relativePath }: DevServerControlProps) {
+export function DevServerControl({ projectId, projectName, relativePath, disabled }: DevServerControlProps) {
     const [running, setRunning] = useState(false);
     const [port, setPort] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
@@ -16,7 +17,7 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
 
     // Check server status
     const checkStatus = useCallback(async () => {
-        if (!projectId) return;
+        if (!projectId || disabled) return;
 
         try {
             const params = new URLSearchParams({ projectId });
@@ -34,22 +35,27 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
     }, [projectId, relativePath]);
 
     useEffect(() => {
+        if (disabled) return;
         checkStatus();
         // Poll status every 5 seconds
         const interval = setInterval(checkStatus, 5000);
         return () => clearInterval(interval);
-    }, [checkStatus]);
+    }, [checkStatus, disabled]);
 
     // Reset state when project changes
     useEffect(() => {
+        if (disabled) return;
         setRunning(false);
         setPort(null);
         setExternal(false);
         checkStatus();
-    }, [projectId, relativePath, checkStatus]);
+    }, [projectId, relativePath, checkStatus, disabled]);
 
     const handleStart = async () => {
-        if (!projectId) return;
+        if (!projectId || disabled) {
+            alert('Tauri mode에서는 Dev Server 제어를 지원하지 않습니다.');
+            return;
+        }
 
         setLoading(true);
         try {
@@ -75,7 +81,7 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
     };
 
     const handleStop = async () => {
-        if (!projectId) return;
+        if (!projectId || disabled) return;
 
         setLoading(true);
         try {
@@ -104,6 +110,20 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
     };
 
     if (!projectId) return null;
+
+    if (disabled) {
+        return (
+            <button
+                className="p-1.5 rounded-lg text-[var(--text-muted)] cursor-not-allowed"
+                title="Tauri mode에서는 Dev Server 제어를 지원하지 않습니다."
+                aria-disabled
+            >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                </svg>
+            </button>
+        );
+    }
 
     return (
         <div className="flex items-center gap-1">

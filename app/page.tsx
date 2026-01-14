@@ -10,16 +10,8 @@ import { ProjectSelector, DevServerControl, ProjectArtifactsModal } from '@/comp
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import packageJson from '@/package.json';
-
-import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
-import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
-
-interface RunningJob {
-  id: string;
-  ticketId: string;
-  agentName: string;
-  status: 'running' | 'completed' | 'failed';
-}
+import { createTicket, loadBoardData, type BoardData } from '@/lib/tauri-board';
+import type { Project } from '@/lib/tauri-projects';
 interface Member {
   id: string;
   role: string;
@@ -44,13 +36,6 @@ interface Ticket {
   assignee?: Member | null;
 }
 
-interface Project {
-  id: string;
-  name: string;
-  path: string;
-  is_active: number;
-}
-
 export default function Dashboard() {
   const [members, setMembers] = useState<Member[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -61,162 +46,128 @@ export default function Dashboard() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [ticketSidebarOpen, setTicketSidebarOpen] = useState(false);
   const [artifactsModalOpen, setArtifactsModalOpen] = useState(false);
-
-  const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
-  const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
-  const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
   const appVersion = packageJson.version;
+  const agentFeaturesEnabled = false;
+  const devServerEnabled = false;
 
-
-
-  // Check for CLI tools on mount
-  useEffect(() => {
-    fetch('/api/check-cli')
-      .then(res => res.json())
-      .then(data => {
-        if (!data.anyInstalled) {
-          setCliWarningModalOpen(true);
-        }
-      })
-      .catch(err => {
-        console.error('Failed to check CLI installation:', err);
-      });
+  const normalizeMembers = useCallback((data: BoardData["members"]): Member[] => {
+    return data.map((member) => ({
+      ...member,
+      system_prompt: '',
+      is_default: 0,
+      can_generate_images: 0,
+      can_log_screenshots: 0,
+    }));
   }, []);
 
-  // Poll for running jobs
-  useEffect(() => {
-    const fetchRunningJobs = async () => {
-      try {
-        const res = await fetch('/api/agent/status');
-        const data = await res.json();
-        setRunningJobs(data.jobs || []);
-      } catch (error) {
-        console.error('Failed to fetch running jobs:', error);
-      }
-    };
-    fetchRunningJobs();
-    const interval = setInterval(fetchRunningJobs, 3000);
-    return () => clearInterval(interval);
+  const attachAssignees = useCallback((items: BoardData["tickets"], allMembers: Member[]): Ticket[] => {
+    const byId = new Map(allMembers.map((member) => [member.id, member]));
+    return items.map((ticket) => ({
+      ...ticket,
+      assignee: ticket.assignee_id ? byId.get(ticket.assignee_id) || null : null,
+    }));
   }, []);
 
-  // Fetch data
-  const fetchData = useCallback(async (projectId?: string) => {
+  const refreshBoard = useCallback(async () => {
+    setLoading(true);
     try {
-      const ticketUrl = projectId
-        ? `/api/tickets?projectId=${projectId}`
-        : '/api/tickets';
-      const [membersRes, ticketsRes] = await Promise.all([
-        fetch('/api/members'),
-        fetch(ticketUrl),
-      ]);
-      const [membersData, ticketsData] = await Promise.all([
-        membersRes.json(),
-        ticketsRes.json(),
-      ]);
-      setMembers(membersData);
-      setTickets(ticketsData);
+      const result = await loadBoardData();
+      const hydratedMembers = normalizeMembers(result.data.members);
+      const hydratedTickets = attachAssignees(result.data.tickets, hydratedMembers);
+      setMembers(hydratedMembers);
+      setTickets(hydratedTickets);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [attachAssignees, normalizeMembers]);
 
   useEffect(() => {
-    fetchData(activeProject?.id);
-  }, [fetchData, activeProject]);
+    refreshBoard();
+  }, [refreshBoard, activeProject?.id]);
 
   const handleTicketCreate = useCallback(async (data: Partial<Ticket>) => {
     try {
-      const res = await fetch('/api/tickets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...data,
-          project_id: activeProject?.id,
-        }),
+      const newTicket = await createTicket({
+        title: data.title || 'New Ticket',
+        description: data.description || undefined,
+        priority: data.priority,
+        assignee_id: data.assignee_id || undefined,
       });
-      const newTicket = await res.json();
-      setTickets(prev => [newTicket, ...prev]);
-      return newTicket as Ticket;
+      const hydrated = attachAssignees([newTicket], members);
+      setTickets((prev) => [...hydrated, ...prev]);
+      return hydrated[0] || null;
     } catch (error) {
       console.error('Failed to create ticket:', error);
       return null;
     }
-  }, [activeProject]);
+  }, [attachAssignees, members]);
 
   const handleTicketUpdate = useCallback(async (id: string, data: Partial<Ticket>) => {
-    try {
-      const res = await fetch(`/api/tickets/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const updatedTicket = await res.json();
-      setTickets(prev => prev.map(t => t.id === id ? updatedTicket : t));
-    } catch (error) {
-      console.error('Failed to update ticket:', error);
-    }
-  }, []);
+    setTickets((prev) =>
+      prev.map((ticket) => {
+        if (ticket.id !== id) return ticket;
+        const next = { ...ticket, ...data };
+        if ('assignee_id' in data) {
+          next.assignee = data.assignee_id
+            ? members.find((member) => member.id === data.assignee_id) || null
+            : null;
+        }
+        return next;
+      })
+    );
+  }, [members]);
 
   const handleTicketDelete = useCallback(async (id: string) => {
-    try {
-      await fetch(`/api/tickets/${id}`, { method: 'DELETE' });
-      setTickets(prev => prev.filter(t => t.id !== id));
-    } catch (error) {
-      console.error('Failed to delete ticket:', error);
-    }
+    setTickets(prev => prev.filter(t => t.id !== id));
   }, []);
 
   const handleMemberUpdate = useCallback((updatedMember: Member) => {
     setMembers(prev => prev.map(m => m.id === updatedMember.id ? updatedMember : m));
+    setTickets(prev => prev.map(ticket => (
+      ticket.assignee_id === updatedMember.id
+        ? { ...ticket, assignee: updatedMember }
+        : ticket
+    )));
   }, []);
 
   const handleMemberCreate = useCallback(async (data: { role: string; name: string; avatar: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean }) => {
-    try {
-      const res = await fetch('/api/members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const newMember = await res.json();
-      setMembers(prev => [...prev, newMember]);
-    } catch (error) {
-      console.error('Failed to create member:', error);
-      alert('Failed to create member. Please try again.');
-    }
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? `mem-${crypto.randomUUID()}`
+        : `mem-${Date.now()}`;
+    const newMember: Member = {
+      id,
+      role: data.role,
+      name: data.name,
+      avatar: data.avatar,
+      system_prompt: data.system_prompt,
+      is_default: 0,
+      can_generate_images: data.can_generate_images ? 1 : 0,
+      can_log_screenshots: data.can_log_screenshots ? 1 : 0,
+    };
+    setMembers(prev => [...prev, newMember]);
   }, []);
 
   const handleMemberDelete = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/members/${id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        alert(error.error || 'Failed to delete member');
-        return;
-      }
-      setMembers(prev => prev.filter(m => m.id !== id));
-    } catch (error) {
-      console.error('Failed to delete member:', error);
-      alert('Failed to delete member. Please try again.');
-    }
+    setMembers(prev => prev.filter(m => m.id !== id));
+    setTickets(prev => prev.map(ticket => (
+      ticket.assignee_id === id ? { ...ticket, assignee_id: null, assignee: null } : ticket
+    )));
   }, []);
 
   const handlePMTicketsCreated = useCallback(() => {
-    fetchData(activeProject?.id); // Refresh all data for current project
-  }, [fetchData, activeProject]);
+    refreshBoard(); // Refresh all data for current project
+  }, [refreshBoard]);
 
   const handleProjectChange = useCallback((project: Project | null) => {
     setActiveProject(project);
   }, []);
 
   const handleRefresh = useCallback(() => {
-    fetchData(activeProject?.id);
-  }, [fetchData, activeProject]);
-
-
+    refreshBoard();
+  }, [refreshBoard]);
 
   const handleCreateTicket = async () => {
     const newTicket = await handleTicketCreate({
@@ -230,7 +181,7 @@ export default function Dashboard() {
     }
   };
 
-  const runningCount = runningJobs.filter(j => j.status === 'running').length;
+  const runningCount = 0;
 
   if (loading) {
     return (
@@ -269,18 +220,34 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-2">
             <ProjectSelector onProjectChange={handleProjectChange} />
-            <DevServerControl projectId={activeProject?.id || null} projectName={activeProject?.name || null} />
+            <DevServerControl
+              projectId={activeProject?.id || null}
+              projectName={activeProject?.name || null}
+              disabled={!devServerEnabled}
+            />
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setArtifactsModalOpen(true)}
+              onClick={() => {
+                if (!agentFeaturesEnabled) {
+                  alert('Tauri 모드에서는 파일 탐색 기능이 비활성화됩니다.');
+                  return;
+                }
+                setArtifactsModalOpen(true);
+              }}
             >
               파일 탐색
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setPmModalOpen(true)}
+              onClick={() => {
+                if (!agentFeaturesEnabled) {
+                  alert('Tauri 모드에서는 PM 요청 기능이 비활성화됩니다.');
+                  return;
+                }
+                setPmModalOpen(true);
+              }}
             >
               PM 요청
             </Button>
@@ -292,7 +259,9 @@ export default function Dashboard() {
               + New
             </Button>
             <button
-              onClick={() => setImageSettingsModalOpen(true)}
+              onClick={() => {
+                alert('Tauri 모드에서는 이미지 설정 기능이 비활성화됩니다.');
+              }}
               className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
               title="이미지 생성 설정"
             >
@@ -334,6 +303,7 @@ export default function Dashboard() {
                 onTicketsReorder={setTickets}
                 hasActiveProject={!!activeProject}
                 onRefresh={handleRefresh}
+                disableAgentStatus={!agentFeaturesEnabled}
                 onTicketSelect={(ticket) => {
                   setSelectedTicket(ticket);
                   setTicketSidebarOpen(true);
@@ -354,6 +324,7 @@ export default function Dashboard() {
                 onTicketUpdate={handleTicketUpdate}
                 onTicketDelete={handleTicketDelete}
                 hasActiveProject={!!activeProject}
+                disableAgentFeatures={!agentFeaturesEnabled}
               />
             ) : (
               <div className="h-full bg-secondary border-l border-primary flex items-center justify-center text-muted">
@@ -396,17 +367,6 @@ export default function Dashboard() {
 
 
 
-      {/* CLI Warning Modal */}
-      <CLIWarningModal
-        isOpen={cliWarningModalOpen}
-        onClose={() => setCliWarningModalOpen(false)}
-      />
-
-      {/* Image Settings Modal */}
-      <ImageSettingsModal
-        isOpen={imageSettingsModalOpen}
-        onClose={() => setImageSettingsModalOpen(false)}
-      />
     </div>
   );
 }

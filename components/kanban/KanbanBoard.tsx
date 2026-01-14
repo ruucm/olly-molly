@@ -55,6 +55,7 @@ interface KanbanBoardProps {
     hasActiveProject?: boolean;
     onRefresh?: () => void;
     onTicketSelect?: (ticket: Ticket) => void;
+    disableAgentStatus?: boolean;
 }
 
 const columns = [
@@ -66,7 +67,7 @@ const columns = [
     { id: 'ON_HOLD', title: 'On Hold', color: 'text-amber-500', icon: '⏸️' },
 ];
 
-export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, onTicketDelete, onTicketsReorder, hasActiveProject, onRefresh, onTicketSelect }: KanbanBoardProps) {
+export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, onTicketDelete, onTicketsReorder, hasActiveProject, onRefresh, onTicketSelect, disableAgentStatus }: KanbanBoardProps) {
     const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
     const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
 
@@ -83,6 +84,7 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
 
     // Poll for running jobs
     useEffect(() => {
+        if (disableAgentStatus) return;
         const fetchRunningJobs = async () => {
             try {
                 const res = await fetch('/api/agent/status');
@@ -102,7 +104,7 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
         fetchRunningJobs();
         const interval = setInterval(fetchRunningJobs, 3000);
         return () => clearInterval(interval);
-    }, [onRefresh]);
+    }, [onRefresh, disableAgentStatus]);
 
     const isTicketRunning = useCallback((ticketId: string) => {
         return runningJobs.some(job => job.ticketId === ticketId && job.status === 'running');

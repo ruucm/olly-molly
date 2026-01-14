@@ -39,6 +39,7 @@ interface TicketSidebarProps {
     onTicketUpdate: (id: string, data: Partial<Ticket>) => void | Promise<void>;
     onTicketDelete?: (id: string) => void | Promise<void>;
     hasActiveProject?: boolean;
+    disableAgentFeatures?: boolean;
 }
 
 const statusOptions = [
@@ -96,7 +97,8 @@ export function TicketSidebar({
     members,
     onTicketUpdate,
     onTicketDelete,
-    hasActiveProject
+    hasActiveProject,
+    disableAgentFeatures
 }: TicketSidebarProps) {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
@@ -116,6 +118,7 @@ export function TicketSidebar({
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
     const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+    const agentFeaturesEnabled = !disableAgentFeatures;
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -148,6 +151,11 @@ export function TicketSidebar({
 
     // Fetch conversations when ticket changes
     useEffect(() => {
+        if (!agentFeaturesEnabled) {
+            setConversations([]);
+            setSelectedConversationId(null);
+            return;
+        }
         if (!ticket) {
             setConversations([]);
             setSelectedConversationId(null);
@@ -173,10 +181,14 @@ export function TicketSidebar({
         // Poll every 2 seconds to keep conversations updated
         const interval = setInterval(fetchConversations, 2000);
         return () => clearInterval(interval);
-    }, [ticket, selectedConversationId]);
+    }, [ticket, selectedConversationId, agentFeaturesEnabled]);
 
     // Fetch messages for selected conversation
     useEffect(() => {
+        if (!agentFeaturesEnabled) {
+            setConversationMessages([]);
+            return;
+        }
         if (!selectedConversationId) {
             setConversationMessages([]);
             return;
@@ -242,7 +254,7 @@ export function TicketSidebar({
                 clearInterval(pollIntervalRef.current);
             }
         };
-    }, [selectedConversationId, ticket?.id, onTicketUpdate]);
+    }, [selectedConversationId, ticket?.id, onTicketUpdate, agentFeaturesEnabled]);
 
     const persistTicketDetails = async () => {
         if (!ticket) return;
@@ -268,6 +280,10 @@ export function TicketSidebar({
     };
 
     const handleExecuteAgent = async () => {
+        if (!agentFeaturesEnabled) {
+            alert('Tauri 모드에서는 에이전트 실행이 비활성화됩니다.');
+            return;
+        }
         if (!ticket || !assigneeId) return;
 
         setExecuting(true);
@@ -322,6 +338,7 @@ export function TicketSidebar({
     };
 
     const handleStopJob = async () => {
+        if (!agentFeaturesEnabled) return;
         if (!currentJobId) return;
 
         try {
@@ -439,7 +456,14 @@ export function TicketSidebar({
             )}
 
             {/* AI Agent Execution Section */}
-            {assigneeId && (
+            {assigneeId && !agentFeaturesEnabled && (
+                <div className="flex-1 flex items-center justify-center text-muted">
+                    <div className="text-center">
+                        <p className="text-sm">Tauri 모드에서는 에이전트 기능이 비활성화됩니다.</p>
+                    </div>
+                </div>
+            )}
+            {assigneeId && agentFeaturesEnabled && (
                 <div className="flex-1 flex flex-col min-h-0">
                     {/* Minimal Agent Control Bar */}
                     <div

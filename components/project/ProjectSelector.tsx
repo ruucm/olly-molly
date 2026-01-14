@@ -1,18 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
+import {
+    listProjects,
+    createEmptyProject,
+    setActiveProject,
+    deleteProject,
+    type Project,
+} from '@/lib/tauri-projects';
 
-
-interface Project {
-    id: string;
-    name: string;
-    path: string;
-    description: string | null;
-    is_active: number;
-}
 
 interface ProjectSelectorProps {
     onProjectChange?: (project: Project | null) => void;
@@ -25,6 +24,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
     const [activeProject, setActiveProject] = useState<Project | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<TabType>('empty');
+    const supportsDevProjectCreation = false;
 
     // Existing project form
     const [newPath, setNewPath] = useState('');
@@ -58,14 +58,9 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         }
     };
 
-    useEffect(() => {
-        fetchProjects();
-    }, []);
-
-    const fetchProjects = async () => {
+    const fetchProjects = useCallback(async () => {
         try {
-            const res = await fetch('/api/projects');
-            const data = await res.json();
+            const data = await listProjects();
             setProjects(data);
             const storedId = getStoredProjectId();
             const storedProject = storedId ? data.find((p: Project) => p.id === storedId) : null;
@@ -81,7 +76,11 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         } catch (err) {
             console.error('Failed to fetch projects:', err);
         }
-    };
+    }, [onProjectChange]);
+
+    useEffect(() => {
+        fetchProjects();
+    }, [fetchProjects]);
 
     const handleAddProject = async () => {
         if (!newPath.trim()) return;
@@ -90,31 +89,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         setError(null);
 
         try {
-            const res = await fetch('/api/projects', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    path: newPath.trim(),
-                    name: newName.trim() || undefined,
-                }),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error);
-            }
-
-            setNewPath('');
-            setNewName('');
-            await fetchProjects();
-
-            // Auto-select if it's the first project
-            if (projects.length === 0) {
-                handleSelectProject(data.id);
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to add project');
+            setError('Tauri mode에서는 기존 경로 추가를 지원하지 않습니다.');
         } finally {
             setLoading(false);
         }
@@ -128,33 +103,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         setCreateProgress('🚀 Next.js 프로젝트 생성 중... (1-2분 소요)');
 
         try {
-            const res = await fetch('/api/projects/dev', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'create',
-                    projectName: createName.trim(),
-                }),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok || data.error) {
-                throw new Error(data.error || 'Failed to create project');
-            }
-
-            setCreateName('');
-            setCreateProgress(null);
-            await fetchProjects();
-
-            // Auto-select the new project
-            if (data.project?.id) {
-                handleSelectProject(data.project.id);
-            }
-
-            alert(`✅ 프로젝트가 생성되었습니다!\n경로: ~/Projects/${createName.trim()}`);
-        } catch (err) {
-            setCreateError(err instanceof Error ? err.message : 'Failed to create project');
+            setCreateError('Tauri mode에서는 Next.js 자동 생성이 비활성화됩니다.');
         } finally {
             setCreating(false);
             setCreateProgress(null);
@@ -168,28 +117,15 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         setEmptyError(null);
 
         try {
-            const res = await fetch('/api/projects', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'create_empty',
-                    name: emptyName.trim(),
-                    parentPath: emptyParentPath.trim() || undefined,
-                }),
+            const project = await createEmptyProject({
+                name: emptyName.trim(),
+                parentPath: emptyParentPath.trim() || undefined,
             });
-
-            const data = await res.json();
-
-            if (!res.ok || data.error) {
-                throw new Error(data.error || 'Failed to create project');
-            }
-
             setEmptyName('');
             setEmptyParentPath('');
             await fetchProjects();
-
-            if (data.id) {
-                handleSelectProject(data.id);
+            if (project.id) {
+                handleSelectProject(project.id);
             }
         } catch (err) {
             setEmptyError(err instanceof Error ? err.message : 'Failed to create project');
@@ -200,16 +136,9 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
 
     const handleSelectProject = async (id: string) => {
         try {
-            const res = await fetch(`/api/projects/${id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ is_active: true }),
-            });
-
-            if (res.ok) {
-                persistProjectId(id);
-                await fetchProjects();
-            }
+            await setActiveProject(id);
+            persistProjectId(id);
+            await fetchProjects();
         } catch (err) {
             console.error('Failed to select project:', err);
         }
@@ -217,7 +146,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
 
     const handleDeleteProject = async (id: string) => {
         try {
-            await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+            await deleteProject(id);
             await fetchProjects();
         } catch (err) {
             console.error('Failed to delete project:', err);
@@ -265,10 +194,11 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                         </button> */}
                         <button
                             onClick={() => setActiveTab('create')}
+                            disabled={!supportsDevProjectCreation}
                             className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'create'
                                 ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                                }`}
+                                } ${!supportsDevProjectCreation ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                             ✨ 새 Next.js 프로젝트
                         </button>
@@ -307,6 +237,11 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                             <p className="text-xs text-[var(--text-muted)]">
                                 Next.js 프로젝트를 ~/Projects/ 폴더에 생성합니다
                             </p>
+                            {!supportsDevProjectCreation && (
+                                <p className="text-xs text-amber-400">
+                                    Tauri 모드에서는 자동 생성 기능이 비활성화됩니다.
+                                </p>
+                            )}
                             <Input
                                 placeholder="my-awesome-app"
                                 value={createName}
@@ -326,7 +261,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                                 variant="primary"
                                 size="sm"
                                 onClick={handleCreateProject}
-                                disabled={!createName.trim() || creating}
+                                disabled={!createName.trim() || creating || !supportsDevProjectCreation}
                             >
                                 {creating ? '생성 중...' : '🚀 프로젝트 생성'}
                             </Button>
