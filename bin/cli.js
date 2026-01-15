@@ -88,6 +88,10 @@ function getLocalVersion() {
 
 const CUSTOM_PROFILES_DIR = path.join(APP_DIR, 'custom-profiles');
 
+function hasProductionBuild() {
+    return fs.existsSync(path.join(APP_DIR, '.next', 'BUILD_ID'));
+}
+
 function backupUserData() {
     const backupDir = path.join(os.tmpdir(), 'olly-molly-backup');
     fs.mkdirSync(backupDir, { recursive: true });
@@ -142,6 +146,7 @@ async function main() {
     const localVersion = getLocalVersion();
     const npmVersion = await getNpmVersion();
     const prebuiltUrl = getPrebuiltUrl(npmVersion);
+    const standaloneServerPath = path.join(APP_DIR, '.next', 'standalone', 'server.js');
 
     async function downloadApp() {
         if (prebuiltUrl) {
@@ -183,8 +188,14 @@ async function main() {
         execSync('npm install --omit=dev', { cwd: APP_DIR, stdio: 'inherit' });
     }
 
+    if (usedPrebuilt && !fs.existsSync(standaloneServerPath)) {
+        usedPrebuilt = false;
+        needsInstall = true;
+        needsBuild = true;
+    }
+
     // Build
-    if (needsBuild || !fs.existsSync(path.join(APP_DIR, '.next'))) {
+    if (needsBuild || !hasProductionBuild()) {
         console.log('\n🔨 Building...\n');
         execSync('npm run build', { cwd: APP_DIR, stdio: 'inherit' });
     }
@@ -204,19 +215,16 @@ async function main() {
 
     let server;
     if (usedPrebuilt) {
-        const serverPath = path.join(APP_DIR, '.next', 'standalone', 'server.js');
-        if (!fs.existsSync(serverPath)) {
-            throw new Error('Prebuilt bundle missing .next/standalone/server.js');
-        }
-        server = spawn('node', [serverPath], {
+        server = spawn('node', [standaloneServerPath], {
             cwd: APP_DIR,
             stdio: 'inherit',
             env: { ...process.env, PORT: '1234' },
-            shell: true
+            shell: false
         });
     } else {
-        server = spawn('npx', ['next', 'start', '--port', '1234'], {
-            cwd: APP_DIR, stdio: 'inherit', shell: true
+        const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+        server = spawn(npxCmd, ['next', 'start', '--port', '1234'], {
+            cwd: APP_DIR, stdio: 'inherit', shell: false
         });
     }
 
