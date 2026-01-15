@@ -275,7 +275,6 @@ export default function Dashboard() {
               projectId={activeProject?.id || null}
               projectName={activeProject?.name || null}
               projectPath={activeProject?.path || null}
-              detectExternal={false}
             />
             <Button
               variant="ghost"

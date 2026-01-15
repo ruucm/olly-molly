@@ -67,7 +67,10 @@ If you need images for your implementation (backgrounds, icons, illustrations, e
     const screenshotInstruction = canLogScreenshots
         ? `\n\nSCREENSHOT REQUIREMENT:
 If you make any UI/visual changes, you MUST take screenshots to document your work:
-1. Start the dev server with PORT=3001 (e.g., "PORT=3001 npm run dev")
+1. Start the dev server on port 3001. Prefer an explicit CLI arg when available:
+   - Next.js: "npm run dev -- --port 3001" (or "next dev -p 3001")
+   - Vite: "npm run dev -- --port 3001"
+   - If the tool only supports env vars: set PORT=3001 using the shell's syntax (Windows PowerShell/CMD differs from bash)
 2. Use browser automation tools (Playwright MCP or similar) to capture screenshots
 3. Save screenshots to the ".agent-screenshots/" folder in the project root
 4. Name files descriptively (e.g., "feature-result.png", "bug-fix-result.png")
@@ -99,7 +102,7 @@ INSTRUCTIONS:
 4. Write clean, well-documented code
 5. After completing, provide a brief summary of changes made
 6. COMMIT REQUIREMENT (MANDATORY): If you made any code or file changes, you MUST create a git commit before finishing. Do not skip this step unless there are truly no changes to commit.
-7. CRITICAL: You are working on the external project "${project.name}". When starting its server, ALWAYS use port 3001 (e.g. "PORT=3001 npm run dev"). NEVER use port 1234.${qaInstruction}${imageGenerationInstruction}${screenshotInstruction}
+7. CRITICAL: You are working on the external project "${project.name}". When starting its server, ALWAYS use port 3001. Prefer "npm run dev -- --port 3001" when supported. NEVER use port 1234.${qaInstruction}${imageGenerationInstruction}${screenshotInstruction}
 
 Please complete this task now.`;
 }

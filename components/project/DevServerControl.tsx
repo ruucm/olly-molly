@@ -92,6 +92,45 @@ export function DevServerControl({
         }
     };
 
+    const handleForceRestart = async () => {
+        if (!projectId) return;
+
+        setLoading(true);
+        try {
+            // Best-effort: stop (including external) and clear stale Next dev lock, then start again.
+            await fetch('/api/projects/dev', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'stop',
+                    projectId,
+                    projectPath,
+                    path: relativePath || undefined,
+                    killExternal: true,
+                    cleanNextLock: true,
+                }),
+            }).catch(() => undefined);
+
+            const res = await fetch('/api/projects/dev', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'start', projectId, projectPath, path: relativePath || undefined }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setRunning(true);
+                setPort(data.port);
+                setExternal(false);
+            } else {
+                alert(data.error || 'Failed to restart dev server');
+            }
+        } catch {
+            alert('Failed to restart dev server');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleStop = async () => {
         if (!projectId) return;
 
@@ -106,6 +145,7 @@ export function DevServerControl({
                     projectPath,
                     path: relativePath || undefined,
                     killExternal: detectExternal,
+                    cleanNextLock: true,
                 }),
             });
 
@@ -132,26 +172,45 @@ export function DevServerControl({
     return (
         <div className="flex items-center gap-1">
             {!running ? (
-                <button
-                    onClick={handleStart}
-                    disabled={loading}
-                    className={`p-1.5 rounded-lg transition-colors ${loading
-                        ? 'text-[var(--text-muted)] cursor-not-allowed'
-                        : 'text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300'
-                        }`}
-                    title="Start dev server (npm run dev)"
-                >
-                    {loading ? (
-                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                <>
+                    <button
+                        onClick={handleStart}
+                        disabled={loading}
+                        className={`p-1.5 rounded-lg transition-colors ${loading
+                            ? 'text-[var(--text-muted)] cursor-not-allowed'
+                            : 'text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300'
+                            }`}
+                        title="Start dev server (npm run dev)"
+                    >
+                        {loading ? (
+                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                        ) : (
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        )}
+                    </button>
+                    <button
+                        onClick={handleForceRestart}
+                        disabled={loading}
+                        className={`p-1.5 rounded-lg transition-colors ${loading
+                            ? 'text-[var(--text-muted)] cursor-not-allowed'
+                            : 'text-amber-400 hover:bg-amber-500/10 hover:text-amber-300'
+                            }`}
+                        title="Force restart (kill + clear Next dev lock)"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M21 12a9 9 0 01-15.364 6.364M3 12a9 9 0 0115.364-6.364M6 18.364H5a2 2 0 01-2-2v-1m18-6v-1a2 2 0 00-2-2h-1"
+                            />
                         </svg>
-                    ) : (
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M8 5v14l11-7z" />
-                        </svg>
-                    )}
-                </button>
+                    </button>
+                </>
             ) : (
                 <>
                     <span className={`flex items-center gap-1 px-2 py-1 text-xs rounded ${external

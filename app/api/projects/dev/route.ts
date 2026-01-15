@@ -55,6 +55,43 @@ const runningDevServers = new Map<string, {
     relativePath: string;
 }>();
 
+function killProcessTree(pid: number): void {
+    if (!pid || pid <= 0) return;
+    const isWindows = process.platform === 'win32';
+    if (isWindows) {
+        // Force-kill the process tree (prevents orphaned node processes / stale Next dev locks)
+        execSync(`taskkill /PID ${pid} /T /F`, {
+            encoding: 'utf-8',
+            timeout: 5000,
+            shell: 'cmd.exe',
+            stdio: 'ignore',
+        });
+        return;
+    }
+
+    try {
+        // Try to kill the process group first
+        process.kill(-pid, 'SIGTERM');
+    } catch {
+        try {
+            process.kill(pid, 'SIGTERM');
+        } catch {
+            // ignore
+        }
+    }
+}
+
+function cleanNextDevLock(projectDir: string): void {
+    try {
+        const lockPath = path.join(projectDir, '.next', 'dev', 'lock');
+        if (fs.existsSync(lockPath)) {
+            fs.rmSync(lockPath, { recursive: true, force: true });
+        }
+    } catch {
+        // best-effort cleanup only
+    }
+}
+
 /**
  * Detect externally running dev server for a project (Windows)
  * Uses wmic/tasklist to find node processes and netstat to check ports
@@ -262,7 +299,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { action, projectId, projectName, parentPath, projectPath, path: relativePath, killExternal } = body;
+        const { action, projectId, projectName, parentPath, projectPath, path: relativePath, killExternal, cleanNextLock } = body;
 
         if (action === 'create') {
             // Create new Next.js project
@@ -442,13 +479,22 @@ export async function POST(request: NextRequest) {
             const serverKey = getServerKey(projectId, normalizedPath);
             const server = runningDevServers.get(serverKey);
             if (server) {
-                try {
-                    // Kill the process and its children
-                    process.kill(-server.process.pid!, 'SIGTERM');
-                } catch {
-                    server.process.kill('SIGTERM');
+                if (server.process.pid) {
+                    try {
+                        killProcessTree(server.process.pid);
+                    } catch {
+                        // ignore
+                    }
                 }
                 runningDevServers.delete(serverKey);
+                if (cleanNextLock) {
+                    try {
+                        const workingDir = resolveProjectPath(projectPath, normalizedPath);
+                        cleanNextDevLock(workingDir);
+                    } catch {
+                        // ignore
+                    }
+                }
                 return NextResponse.json({ success: true, running: false });
             }
 
@@ -469,7 +515,10 @@ export async function POST(request: NextRequest) {
             if (externalServer.running && externalServer.pid) {
                 try {
                     // Kill the external process
-                    process.kill(externalServer.pid, 'SIGTERM');
+                    killProcessTree(externalServer.pid);
+                    if (cleanNextLock) {
+                        cleanNextDevLock(targetPath);
+                    }
                     return NextResponse.json({ success: true, running: false });
                 } catch (error) {
                     console.error('Failed to kill external dev server:', error);
