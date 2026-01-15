@@ -6,6 +6,26 @@ import os from 'os';
 
 const ROOT_RELATIVE_PATH = '.';
 
+// Cache external dev server detection results (status polling calls this frequently)
+const EXTERNAL_DETECT_CACHE_TTL_MS = 15_000;
+const externalDetectCache = new Map<string, { ts: number; result: { running: boolean; port?: number; pid?: number } }>();
+
+// Cache per-PID command line lookups to avoid repeated slow WMIC calls
+const PID_INFO_CACHE_TTL_MS = 30_000;
+const pidCmdlineCache = new Map<number, { ts: number; cmdlineLower: string }>();
+
+function isLikelyDevPort(port: number): boolean {
+    return (
+        (port >= 3000 && port < 4000) ||
+        (port >= 4000 && port < 5000) ||
+        (port >= 5000 && port < 6000) ||
+        (port >= 8000 && port < 9000) ||
+        port === 5173 ||
+        port === 8080 ||
+        port === 1234
+    );
+}
+
 function normalizeRelativePath(relativePath?: string | null): string {
     if (!relativePath) return ROOT_RELATIVE_PATH;
     const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
@@ -44,27 +64,21 @@ function detectExternalDevServerWindows(targetPath: string): { running: boolean;
         // Normalize the target path for Windows comparison
         const normalizedTarget = targetPath.replace(/\//g, '\\').toLowerCase();
 
-        // Step 1: Find node.exe processes listening on ports using netstat
+        // Step 1: Find listening ports using netstat
         // netstat -ano outputs lines like:
         // TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       12345
         let netstatResult: string;
         try {
-            netstatResult = execSync('netstat -ano | findstr LISTENING | findstr /I node', {
+            // NOTE: netstat output does not include process name; filtering for "node" is unreliable.
+            // Keep this single call fast - this endpoint is polled from the UI.
+            netstatResult = execSync('netstat -ano | findstr LISTENING', {
                 encoding: 'utf-8',
-                timeout: 10000,
+                timeout: 3000,
                 shell: 'cmd.exe',
+                maxBuffer: 2 * 1024 * 1024,
             });
         } catch {
-            // findstr returns error if no match, try without node filter
-            try {
-                netstatResult = execSync('netstat -ano | findstr LISTENING', {
-                    encoding: 'utf-8',
-                    timeout: 10000,
-                    shell: 'cmd.exe',
-                });
-            } catch {
-                return { running: false };
-            }
+            return { running: false };
         }
 
         if (!netstatResult.trim()) return { running: false };
@@ -78,7 +92,8 @@ function detectExternalDevServerWindows(targetPath: string): { running: boolean;
             if (match) {
                 const port = parseInt(match[1], 10);
                 const pid = parseInt(match[2], 10);
-                if (!isNaN(port) && !isNaN(pid) && pid > 0) {
+                // Only keep ports that are plausibly dev servers to avoid scanning every PID on the machine
+                if (!isNaN(port) && !isNaN(pid) && pid > 0 && isLikelyDevPort(port)) {
                     if (!pidPortMap.has(pid)) {
                         pidPortMap.set(pid, []);
                     }
@@ -89,29 +104,34 @@ function detectExternalDevServerWindows(targetPath: string): { running: boolean;
 
         if (pidPortMap.size === 0) return { running: false };
 
-        // Step 2: Check each listening PID to see if it's a node process in our target directory
-        // Use wmic to get process info including command line
-        for (const [pid, ports] of pidPortMap) {
+        // Step 2: Check candidate PIDs to see if they match our target directory
+        // WMIC is slow on Windows; keep the scan bounded and cached.
+        const now = Date.now();
+        const candidates = Array.from(pidPortMap.entries()).slice(0, 25);
+        for (const [pid, ports] of candidates) {
             try {
-                // Get process details using wmic
-                const wmicResult = execSync(
-                    `wmic process where "ProcessId=${pid}" get Name,ExecutablePath,CommandLine /format:list`,
-                    {
-                        encoding: 'utf-8',
-                        timeout: 5000,
-                        shell: 'cmd.exe',
-                    }
-                );
-
-                const wmicLower = wmicResult.toLowerCase();
-                
-                // Check if it's a node process
-                if (!wmicLower.includes('node.exe')) {
-                    continue;
+                let cmdLower: string | null = null;
+                const cached = pidCmdlineCache.get(pid);
+                if (cached && now - cached.ts < PID_INFO_CACHE_TTL_MS) {
+                    cmdLower = cached.cmdlineLower;
+                } else {
+                    const wmicResult = execSync(
+                        `wmic process where "ProcessId=${pid}" get CommandLine /format:list`,
+                        {
+                            encoding: 'utf-8',
+                            timeout: 800,
+                            shell: 'cmd.exe',
+                            maxBuffer: 512 * 1024,
+                        }
+                    );
+                    cmdLower = wmicResult.toLowerCase();
+                    pidCmdlineCache.set(pid, { ts: now, cmdlineLower: cmdLower });
                 }
 
-                // Check if the command line or executable path contains our target path
-                if (wmicLower.includes(normalizedTarget)) {
+                if (!cmdLower) continue;
+
+                // Must contain the target path to be considered "our" dev server
+                if (cmdLower.includes(normalizedTarget)) {
                     // Found a node process in our target directory
                     // Return the first common dev server port (3000-3999, 4000-4999, 5000-5999, 8000-8999)
                     const devPort = ports.find(p => 
@@ -124,64 +144,9 @@ function detectExternalDevServerWindows(targetPath: string): { running: boolean;
                     return { running: true, port: devPort, pid };
                 }
 
-                // Alternative: Check if cwd matches using PowerShell (more reliable but slower)
-                try {
-                    const psResult = execSync(
-                        `powershell -Command "(Get-Process -Id ${pid}).Path"`,
-                        {
-                            encoding: 'utf-8',
-                            timeout: 3000,
-                            shell: 'cmd.exe',
-                        }
-                    ).trim().toLowerCase();
-                    
-                    if (psResult.includes('node') && wmicLower.includes(normalizedTarget)) {
-                        const devPort = ports.find(p => 
-                            (p >= 3000 && p < 4000) || 
-                            (p >= 4000 && p < 5000) || 
-                            (p >= 5000 && p < 6000) || 
-                            (p >= 8000 && p < 9000)
-                        ) || ports[0];
-                        
-                        return { running: true, port: devPort, pid };
-                    }
-                } catch {
-                    // PowerShell check failed, continue
-                }
             } catch {
                 // This PID check failed, try next
                 continue;
-            }
-        }
-
-        // Fallback: Check if any node process is listening on common dev ports
-        // and the project path has a running dev server by checking port accessibility
-        const commonDevPorts = [3000, 3001, 3002, 4000, 5000, 5173, 8000, 8080];
-        for (const port of commonDevPorts) {
-            const pids = Array.from(pidPortMap.entries())
-                .filter(([_, ports]) => ports.includes(port))
-                .map(([pid, _]) => pid);
-            
-            for (const pid of pids) {
-                try {
-                    const wmicResult = execSync(
-                        `wmic process where "ProcessId=${pid}" get Name /format:list`,
-                        {
-                            encoding: 'utf-8',
-                            timeout: 3000,
-                            shell: 'cmd.exe',
-                        }
-                    );
-                    
-                    if (wmicResult.toLowerCase().includes('node.exe')) {
-                        // Found a node process on a common dev port
-                        // We can't definitively confirm it's for our project without cwd check
-                        // but this is a reasonable fallback
-                        return { running: true, port, pid };
-                    }
-                } catch {
-                    continue;
-                }
             }
         }
 
@@ -494,6 +459,7 @@ export async function POST(request: NextRequest) {
             } catch {
                 return NextResponse.json({ error: 'Invalid project path' }, { status: 400 });
             }
+            // For stop we should NOT use the cache (avoid killing a stale PID)
             const externalServer = detectExternalDevServer(targetPath);
             if (externalServer.running && externalServer.pid) {
                 try {
@@ -542,6 +508,7 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get('projectId');
     const projectPath = searchParams.get('projectPath');
     const relativePath = searchParams.get('path');
+    const skipExternal = searchParams.get('external') === '0';
 
     if (!projectId) {
         // Return all running servers
@@ -570,14 +537,33 @@ export async function GET(request: NextRequest) {
     }
 
     // Check for externally running dev server
-    if (projectPath) {
+    if (projectPath && !skipExternal) {
         let targetPath: string;
         try {
             targetPath = resolveProjectPath(projectPath, normalizedPath);
         } catch {
             return NextResponse.json({ running: false });
         }
+
+        const cacheKey = `${process.platform}:${targetPath}`;
+        const now = Date.now();
+        const cached = externalDetectCache.get(cacheKey);
+        if (cached && now - cached.ts < EXTERNAL_DETECT_CACHE_TTL_MS) {
+            const r = cached.result;
+            if (r.running && r.port) {
+                return NextResponse.json({
+                    running: true,
+                    port: r.port,
+                    url: `http://localhost:${r.port}`,
+                    external: true,
+                    pid: r.pid,
+                });
+            }
+            return NextResponse.json({ running: false });
+        }
+
         const externalServer = detectExternalDevServer(targetPath);
+        externalDetectCache.set(cacheKey, { ts: now, result: externalServer });
         if (externalServer.running && externalServer.port) {
             return NextResponse.json({
                 running: true,
