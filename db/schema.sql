@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   assignee_id TEXT REFERENCES members(id),
   project_id TEXT REFERENCES projects(id),
   created_by TEXT,
+  order_index REAL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

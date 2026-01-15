@@ -161,8 +161,12 @@ export default function Dashboard() {
       console.error('Failed to update ticket:', error);
     }
   }, []);
-  const handleTicketsReorder = useCallback(() => {
-    // Order is derived from status/priority; no local ordering to persist yet.
+  const handleTicketsReorder = useCallback((reorderedTickets: { id: string }[]) => {
+    const updates = reorderedTickets.map((t, index) => ({
+      id: t.id,
+      order_index: index * 1000,
+    }));
+    ticketService.reorder(updates);
   }, []);
 
   const handleTicketDelete = useCallback(async (id: string) => {
@@ -331,7 +335,7 @@ export default function Dashboard() {
                 onTicketCreate={handleTicketCreate}
                 onTicketUpdate={handleTicketUpdate}
                 onTicketDelete={handleTicketDelete}
-                  onTicketsReorder={handleTicketsReorder}
+                onTicketsReorder={handleTicketsReorder}
                 hasActiveProject={!!activeProject}
                 onRefresh={handleRefresh}
                 onTicketSelect={(ticket) => {
