@@ -463,13 +463,50 @@ function createIndexedDbCollection<T extends { id: string }>(storeName: StoreNam
   });
 }
 
+function createIndexedDbCollectionWithOptions<T extends { id: string }>(
+  storeName: StoreName,
+  options?: { scheduleSqliteDump?: boolean },
+) {
+  const shouldScheduleSqliteDump = options?.scheduleSqliteDump ?? true;
+  const sync = createIndexedDbSync<T>(storeName);
+  return createCollection<T>({
+    id: storeName,
+    getKey: (item) => item.id,
+    sync,
+    onInsert: async ({ transaction }) => {
+      const db = await getIdb();
+      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
+      if (shouldScheduleSqliteDump) scheduleSqliteDump();
+    },
+    onUpdate: async ({ transaction }) => {
+      const db = await getIdb();
+      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
+      if (shouldScheduleSqliteDump) scheduleSqliteDump();
+    },
+    onDelete: async ({ transaction }) => {
+      const db = await getIdb();
+      await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
+      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
+      if (shouldScheduleSqliteDump) scheduleSqliteDump();
+    },
+  });
+}
+
 const membersCollection = createIndexedDbCollection<Member>(STORE_NAMES.members);
 const ticketsCollection = createIndexedDbCollection<Ticket>(STORE_NAMES.tickets);
 const activityLogsCollection = createIndexedDbCollection<ActivityLog>(STORE_NAMES.activityLogs);
 const projectsCollection = createIndexedDbCollection<Project>(STORE_NAMES.projects);
 const agentWorkLogsCollection = createIndexedDbCollection<AgentWorkLog>(STORE_NAMES.agentWorkLogs);
 const conversationsCollection = createIndexedDbCollection<Conversation>(STORE_NAMES.conversations);
-const conversationMessagesCollection = createIndexedDbCollection<ConversationMessage>(STORE_NAMES.conversationMessages);
+// Conversation messages can grow rapidly while an agent is running. Avoid rebuilding the entire
+// sqlite dump on every streamed log append; the dump will still be refreshed by higher-level
+// updates (e.g. conversation completion, ticket changes).
+const conversationMessagesCollection = createIndexedDbCollectionWithOptions<ConversationMessage>(
+  STORE_NAMES.conversationMessages,
+  { scheduleSqliteDump: false },
+);
 
 const DEFAULT_MEMBERS: Array<Omit<Member, 'created_at' | 'updated_at'>> = [
   {
