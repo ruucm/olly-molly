@@ -11,6 +11,14 @@ import { ActivityLog } from '@/components/activity/ActivityLog';
 import { projectService, ticketService } from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
 
+function stripAnsi(input: string): string {
+    return input
+        .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')
+        .replace(/\x1B\][^\x07]*(\x07|\x1B\\)/g, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
+}
+
 interface Member {
     id: string;
     name: string;
@@ -454,7 +462,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                                             {runningJob.agentName}
                                         </span>
                                         <Badge variant="default" size="sm">
-                                            {runningJob.output.split('\n').length} lines
+                                            {stripAnsi(runningJob.output).split('\n').length} lines
                                         </Badge>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -476,7 +484,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                                     ref={outputRef}
                                     className={`text-xs text-[var(--text-tertiary)] overflow-auto whitespace-pre-wrap bg-black/30 rounded p-3 font-mono transition-all ${expandedLog ? 'max-h-[60vh]' : 'max-h-48'}`}
                                 >
-                                    {runningJob.output || 'Starting...'}
+                                    {stripAnsi(runningJob.output) || 'Starting...'}
                                 </pre>
                                 {runningJob.status === 'running' && (
                                     <div className="mt-2 flex items-center gap-2 text-xs text-blue-400">

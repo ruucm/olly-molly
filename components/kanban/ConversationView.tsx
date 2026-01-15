@@ -3,6 +3,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Conversation, ConversationMessage } from '@/lib/client-db';
 
+function stripAnsi(input: string): string {
+    // Covers CSI + OSC sequences commonly emitted by CLIs (colors, hyperlinks, etc.)
+    // CSI: ESC [ ... cmd
+    // OSC: ESC ] ... (BEL | ESC \)
+    return input
+        .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')
+        .replace(/\x1B\][^\x07]*(\x07|\x1B\\)/g, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
+}
+
+function classifyLogLine(line: string): 'stderr' | 'error' | 'normal' {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('[stderr]')) return 'stderr';
+    if (trimmed.startsWith('[error]')) return 'error';
+    if (/^\s*(error:|fatal:)/i.test(trimmed)) return 'error';
+    return 'normal';
+}
+
 type ConversationWithAgent = Conversation & {
     agent?: {
         id: string;
@@ -108,6 +127,27 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
         }
     };
 
+    const renderLogContent = (raw: string) => {
+        const cleaned = stripAnsi(raw);
+        const lines = cleaned.split('\n');
+        return (
+            <div className="space-y-0.5">
+                {lines.map((line, idx) => {
+                    const kind = classifyLogLine(line);
+                    const lineClass =
+                        kind === 'stderr' || kind === 'error'
+                            ? 'text-red-300'
+                            : 'text-[inherit]';
+                    return (
+                        <div key={idx} className={`whitespace-pre-wrap break-words ${lineClass}`}>
+                            {line}
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
+
     const parseTimestamp = (value: string) => {
         const hasTimezone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(value);
         const normalized = hasTimezone
@@ -176,9 +216,9 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
                     sortedMessages.map((message) => (
                         <div
                             key={message.id}
-                            className={`pmargin-bottom: 2px; rounded-lg border p-2 font-mono text-xs whitespace-pre-wrap break-words ${getMessageTypeClass(message.message_type)}`}
+                            className={`rounded-lg border p-2 font-mono text-xs ${getMessageTypeClass(message.message_type)}`}
                         >
-                            {message.content}
+                            {renderLogContent(message.content)}
                         </div>
                     ))
                 )}
