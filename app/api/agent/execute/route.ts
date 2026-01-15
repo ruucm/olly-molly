@@ -44,7 +44,7 @@ function buildAgentPrompt(ticket: {
     const isQA = agent.role === 'QA';
     const qaInstruction = isQA
         ? `\nIMPORTANT:
-1. PORT CONFIGURATION: When running tests or starting servers for the TARGET PROJECT, you MUST use port 3001 (or any port other than 1234) to avoid conflict with this dashboard app. Use "PORT=3001 npm run dev" or equivalent.
+1. PORT CONFIGURATION: When running tests or starting servers for the TARGET PROJECT.
 2. TOOL USAGE: You MUST use the **Playwright MCP** (https://github.com/microsoft/playwright-mcp) tools for automated testing. verify the available tools and use them for browser automation and testing. Do NOT rely solely on manual terminal commands.`
         : '';
 
