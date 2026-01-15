@@ -148,6 +148,7 @@ async function main() {
     const npmVersion = await getNpmVersion();
     const prebuiltUrl = getPrebuiltUrl(npmVersion);
     const standaloneServerPath = path.join(APP_DIR, '.next', 'standalone', 'server.js');
+    const prebuiltOnDisk = () => fs.existsSync(standaloneServerPath);
 
     async function downloadApp() {
         if (prebuiltUrl) {
@@ -183,13 +184,17 @@ async function main() {
         needsBuild = !usedPrebuilt;
     }
 
+    if (!usedPrebuilt && prebuiltOnDisk()) {
+        usedPrebuilt = true;
+    }
+
     // Install
     if (needsInstall || !fs.existsSync(path.join(APP_DIR, 'node_modules'))) {
         console.log('📦 Installing...\n');
         execSync('npm install --omit=dev', { cwd: APP_DIR, stdio: 'inherit' });
     }
 
-    if (usedPrebuilt && !fs.existsSync(standaloneServerPath)) {
+    if (usedPrebuilt && !prebuiltOnDisk()) {
         usedPrebuilt = false;
         needsInstall = true;
         needsBuild = true;
