@@ -18,6 +18,14 @@ import {
 } from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
 
+function stripAnsi(input: string): string {
+    return input
+        .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')
+        .replace(/\x1B\][^\x07]*(\x07|\x1B\\)/g, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
+}
+
 interface Member {
     id: string;
     name: string;
@@ -199,7 +207,12 @@ export function TicketSidebar({
                 const previous = lastOutputRef.current;
                 if (output.length > previous.length) {
                     const delta = output.slice(previous.length);
-                    conversationMessageService.create(selectedConversationId, delta, 'log');
+                    const cleaned = stripAnsi(delta);
+                    const type =
+                        cleaned.includes('[stderr]') || cleaned.includes('[error]') || /(^|\n)\s*(error:|fatal:)/i.test(cleaned)
+                            ? 'error'
+                            : 'log';
+                    conversationMessageService.create(selectedConversationId, cleaned, type);
                     lastOutputRef.current = output;
                 }
             } catch (error) {
