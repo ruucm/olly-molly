@@ -8,6 +8,7 @@ import {
   eq,
 } from '@tanstack/react-db';
 import type { SyncConfig } from '@tanstack/react-db';
+import type { PendingMutation } from '@tanstack/react-db';
 
 export interface Member {
   id: string;
@@ -153,9 +154,30 @@ function getIdb(): Promise<IDBPDatabase> {
   return dbPromise;
 }
 
-function createIndexedDbSync<T extends { id: string }>(storeName: StoreName): SyncConfig<T> {
+type IndexedDbSync<T extends { id: string }> = SyncConfig<T> & {
+  confirmOperationsSync: (mutations: Array<PendingMutation<T>>) => void;
+};
+
+function createIndexedDbSync<T extends { id: string }>(storeName: StoreName): IndexedDbSync<T> {
+  let syncParams: Parameters<SyncConfig<T>['sync']>[0] | null = null;
+
+  const confirmOperationsSync = (mutations: Array<PendingMutation<T>>) => {
+    if (!syncParams) return;
+    const { begin, write, commit } = syncParams;
+    begin();
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'delete') {
+        write({ type: 'delete', key: mutation.key });
+        return;
+      }
+      write({ type: mutation.type, value: mutation.modified });
+    });
+    commit();
+  };
+
   return {
     sync: (params) => {
+      syncParams = params;
       let cancelled = false;
       void (async () => {
         try {
@@ -180,6 +202,7 @@ function createIndexedDbSync<T extends { id: string }>(storeName: StoreName): Sy
         cancelled = true;
       };
     },
+    confirmOperationsSync,
   };
 }
 
@@ -414,23 +437,27 @@ async function persistSqliteDump() {
 }
 
 function createIndexedDbCollection<T extends { id: string }>(storeName: StoreName) {
+  const sync = createIndexedDbSync<T>(storeName);
   return createCollection<T>({
     id: storeName,
     getKey: (item) => item.id,
-    sync: createIndexedDbSync<T>(storeName),
+    sync,
     onInsert: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
     },
     onUpdate: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
     },
     onDelete: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
+      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
     },
   });
