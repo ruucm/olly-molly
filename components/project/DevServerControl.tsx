@@ -7,9 +7,20 @@ interface DevServerControlProps {
     projectName: string | null;
     projectPath?: string | null;
     relativePath?: string | null;
+    /**
+     * When false, only servers started by this dashboard are considered "running".
+     * This disables OS-wide external dev server detection and external stop.
+     */
+    detectExternal?: boolean;
 }
 
-export function DevServerControl({ projectId, projectName, projectPath, relativePath }: DevServerControlProps) {
+export function DevServerControl({
+    projectId,
+    projectName,
+    projectPath,
+    relativePath,
+    detectExternal = true,
+}: DevServerControlProps) {
     const [running, setRunning] = useState(false);
     const [port, setPort] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
@@ -27,6 +38,9 @@ export function DevServerControl({ projectId, projectName, projectPath, relative
             if (relativePath) {
                 params.set('path', relativePath);
             }
+            if (!detectExternal) {
+                params.set('external', '0');
+            }
             const res = await fetch(`/api/projects/dev?${params.toString()}`);
             const data = await res.json();
             setRunning(data.running);
@@ -35,7 +49,7 @@ export function DevServerControl({ projectId, projectName, projectPath, relative
         } catch (error) {
             console.error('Failed to check dev server status:', error);
         }
-    }, [projectId, projectPath, relativePath]);
+    }, [projectId, projectPath, relativePath, detectExternal]);
 
     useEffect(() => {
         checkStatus();
@@ -86,7 +100,13 @@ export function DevServerControl({ projectId, projectName, projectPath, relative
             const res = await fetch('/api/projects/dev', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'stop', projectId, projectPath, path: relativePath || undefined }),
+                body: JSON.stringify({
+                    action: 'stop',
+                    projectId,
+                    projectPath,
+                    path: relativePath || undefined,
+                    killExternal: detectExternal,
+                }),
             });
 
             const data = await res.json();

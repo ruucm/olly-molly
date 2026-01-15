@@ -262,7 +262,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { action, projectId, projectName, parentPath, projectPath, path: relativePath } = body;
+        const { action, projectId, projectName, parentPath, projectPath, path: relativePath, killExternal } = body;
 
         if (action === 'create') {
             // Create new Next.js project
@@ -449,6 +449,11 @@ export async function POST(request: NextRequest) {
                     server.process.kill('SIGTERM');
                 }
                 runningDevServers.delete(serverKey);
+                return NextResponse.json({ success: true, running: false });
+            }
+
+            // Optionally skip killing externally started servers
+            if (killExternal === false) {
                 return NextResponse.json({ success: true, running: false });
             }
 
