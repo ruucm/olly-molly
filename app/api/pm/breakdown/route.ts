@@ -51,7 +51,9 @@ CRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The for
 }`;
 
 // Detect available CLI tool
-async function detectCLI(): Promise<'claude' | 'opencode' | 'codex' | null> {
+type SupportedCLI = 'claude' | 'opencode' | 'codex';
+
+async function getAvailableCLIs(): Promise<SupportedCLI[]> {
     const isWindows = process.platform === 'win32';
     const whichCmd = isWindows ? 'where' : 'which';
 
@@ -63,18 +65,40 @@ async function detectCLI(): Promise<'claude' | 'opencode' | 'codex' | null> {
         });
     };
 
-    if (await checkCommand('codex')) return 'codex';
-    if (await checkCommand('claude')) return 'claude';
-    if (await checkCommand('opencode')) return 'opencode';
-    return null;
+    const available: SupportedCLI[] = [];
+    if (await checkCommand('codex')) available.push('codex');
+    if (await checkCommand('claude')) available.push('claude');
+    if (await checkCommand('opencode')) available.push('opencode');
+    return available;
 }
 
-async function breakdownWithCLI(request: string, projectPath: string): Promise<{ tasks: TaskFromAI[]; summary: string }> {
-    const cli = await detectCLI();
+function truncateForResponse(text: string, max = 8000): string {
+    if (text.length <= max) return text;
+    return `${text.slice(0, max)}\n... (truncated ${text.length - max} chars)`;
+}
 
-    if (!cli) {
-        throw new Error('No CLI tool available. Please install codex, claude, or opencode.');
+function classifyCliError(raw: string): { status: number; publicMessage: string } {
+    const msg = raw.toLowerCase();
+
+    if (msg.includes('usage_limit_reached') || msg.includes('too many requests') || msg.includes('http 429') || msg.includes("you've hit your usage limit")) {
+        return { status: 429, publicMessage: 'CLI usage limit reached (429). Try another provider or wait for quota reset.' };
     }
+    if (msg.includes('no cli tool available')) {
+        return { status: 503, publicMessage: 'No CLI tool available on server. Install and authenticate codex/claude/opencode.' };
+    }
+    if (msg.includes('cli timeout')) {
+        return { status: 504, publicMessage: 'CLI timeout. The request took too long.' };
+    }
+    if (msg.includes('failed to start cli') || msg.includes('enoent')) {
+        return { status: 503, publicMessage: 'Failed to start CLI. Check PATH and permissions.' };
+    }
+    if (msg.includes('failed to parse cli output') || msg.includes('no valid json')) {
+        return { status: 502, publicMessage: 'CLI returned invalid output (expected JSON).' };
+    }
+    return { status: 500, publicMessage: 'Failed to run CLI.' };
+}
+
+async function breakdownWithCLI(cli: SupportedCLI, request: string, projectPath: string): Promise<{ tasks: TaskFromAI[]; summary: string }> {
 
     const fullPrompt = `${SYSTEM_PROMPT}
 
@@ -139,7 +163,8 @@ Feature Request: ${request}`;
 
         proc.on('close', (code) => {
             if (code !== 0) {
-                reject(new Error(`CLI exited with code ${code}: ${errorOutput}`));
+                const combined = `CLI exited with code ${code}\n\n[stderr]\n${errorOutput}\n\n[stdout]\n${output}`;
+                reject(new Error(combined.trim()));
                 return;
             }
 
@@ -183,8 +208,27 @@ export async function POST(request: NextRequest) {
             ? body.project_path.trim()
             : process.cwd();
 
-        // Use CLI to break down the request
-        const aiResponse = await breakdownWithCLI(body.request, projectPath);
+        const available = await getAvailableCLIs();
+        if (available.length === 0) {
+            return NextResponse.json(
+                { error: 'No CLI tool available. Please install codex, claude, or opencode.' },
+                { status: 503 },
+            );
+        }
+
+        const requestedProvider = (body.provider ?? process.env.PM_CLI_PROVIDER ?? 'opencode') as SupportedCLI;
+        if (!available.includes(requestedProvider)) {
+            return NextResponse.json(
+                {
+                    error: `Requested provider "${requestedProvider}" is not available on this server.`,
+                    available_providers: available,
+                },
+                { status: 400 },
+            );
+        }
+
+        // Run ONLY the requested provider (no fallback)
+        const aiResponse = await breakdownWithCLI(requestedProvider, body.request, projectPath);
 
         return NextResponse.json({
             success: true,
@@ -192,13 +236,16 @@ export async function POST(request: NextRequest) {
             tickets_created: aiResponse.tasks.length,
             tasks: aiResponse.tasks,
             ai_summary: aiResponse.summary,
+            provider: requestedProvider,
             message: `PM이 AI를 사용해 "${body.request}" 요청을 분석하여 ${aiResponse.tasks.length}개의 태스크를 생성했습니다.`,
         }, { status: 201 });
     } catch (error) {
         console.error('Error in PM breakdown:', error);
+        const details = error instanceof Error ? error.message : String(error);
+        const classified = classifyCliError(details);
         return NextResponse.json(
-            { error: 'Failed to process feature request', details: String(error) },
-            { status: 500 }
+            { error: 'Failed to process feature request', details: truncateForResponse(details) },
+            { status: classified.status },
         );
     }
 }

@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { memberService, ticketService, useProjects } from '@/lib/client-db';
+import type { AgentProvider } from '@/lib/agent-jobs';
 
 interface CreatedTicket {
     id: string;
@@ -35,6 +36,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
     const [question, setQuestion] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [provider, setProvider] = useState<AgentProvider>('opencode');
     const [result, setResult] = useState<{
         message: string;
         summary?: string;
@@ -44,6 +46,20 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
 
     const projects = useProjects();
     const project = useMemo(() => projects.find((item) => item.id === projectId) || null, [projects, projectId]);
+
+    // Match TicketModal behavior: persist provider selection
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const savedProvider = window.localStorage.getItem('agentProvider') as AgentProvider | null;
+        if (savedProvider === 'claude' || savedProvider === 'opencode' || savedProvider === 'codex') {
+            setProvider(savedProvider);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem('agentProvider', provider);
+    }, [provider]);
 
     const handleSubmitRequest = async () => {
         if (!request.trim()) return;
@@ -59,13 +75,18 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                     request: request.trim(),
                     project_id: projectId,
                     project_path: project?.path,
+                    provider,
                 }),
             });
 
             const data = await res.json();
 
             if (!res.ok) {
-                throw new Error(data.error || 'Failed to process request');
+                const detailText = typeof data?.details === 'string' && data.details.trim() ? `\n\n${data.details.trim()}` : '';
+                const attemptsText = Array.isArray(data?.attempts) && data.attempts.length > 0
+                    ? `\n\n(attempts: ${data.attempts.map((a: any) => `${a.cli}:${a.status}`).join(', ')})`
+                    : '';
+                throw new Error(`[${res.status}] ${data.error || 'Failed to process request'}${attemptsText}${detailText}`);
             }
 
             if (data.success) {
@@ -119,6 +140,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                 body: JSON.stringify({
                     question: question.trim(),
                     project_path: project?.path,
+                    provider,
                 }),
             });
 
@@ -163,8 +185,56 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         BUG_HUNTER: 'Bug Hunter',
     };
 
+    const providerLabel = provider === 'opencode'
+        ? 'OpenCode'
+        : provider === 'codex'
+            ? 'Codex'
+            : 'Claude';
+
     return (
         <Modal isOpen={isOpen} onClose={handleClose} title="🤖 PM Agent" size="lg">
+            {/* Provider Selection (same style as TicketModal) */}
+            <div className="flex items-center justify-between gap-3 mb-4">
+                <p className="text-sm text-[var(--text-tertiary)]">
+                    Provider: <span className="text-[var(--text-primary)] font-medium">{providerLabel}</span>
+                </p>
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setProvider('claude')}
+                        disabled={loading}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${provider === 'claude'
+                            ? 'bg-indigo-500 text-white'
+                            : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                            } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        🟠 Claude
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setProvider('codex')}
+                        disabled={loading}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${provider === 'codex'
+                            ? 'bg-orange-500 text-white'
+                            : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                            } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        🔵 Codex
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setProvider('opencode')}
+                        disabled={loading}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${provider === 'opencode'
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                            } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        ⚪️ OpenCode
+                    </button>
+                </div>
+            </div>
+
             {/* Tab Navigation */}
             <div className="flex gap-2 mb-4 border-b border-[var(--border-primary)]">
                 <button
@@ -212,7 +282,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
 
                             {error && (
                                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                                    <p className="text-red-400 text-sm">❌ {error}</p>
+                                    <p className="text-red-400 text-sm whitespace-pre-wrap">❌ {error}</p>
                                 </div>
                             )}
 
@@ -229,7 +299,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                             AI 분석 중...
                                         </>
                                     ) : (
-                                        <>🧠 AI로 분석하기</>
+                                        <>🧠 {providerLabel}로 분석하기</>
                                     )}
                                 </Button>
                             </div>
@@ -311,7 +381,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
 
                     {error && (
                         <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                            <p className="text-red-400 text-sm">❌ {error}</p>
+                            <p className="text-red-400 text-sm whitespace-pre-wrap">❌ {error}</p>
                         </div>
                     )}
 
@@ -337,7 +407,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                     답변 생성 중...
                                 </>
                             ) : (
-                                <>💬 질문하기</>
+                                <>💬 {providerLabel}로 질문하기</>
                             )}
                         </Button>
                     </div>
