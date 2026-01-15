@@ -11,6 +11,7 @@ import {
     conversationMessageService,
     conversationService,
     projectService,
+    ticketService,
     useConversationMessages,
     useConversations,
     type Conversation,
@@ -339,6 +340,11 @@ export function TicketSidebar({
                 throw new Error('Missing agent or active project for execution');
             }
 
+            const persistedTicket = ticketService.getById(ticket.id);
+            if (!persistedTicket) {
+                throw new Error('Failed to load ticket from database');
+            }
+
             const conversation = conversationService.create({
                 ticket_id: ticket.id,
                 agent_id: agent.id,
@@ -348,7 +354,7 @@ export function TicketSidebar({
 
             conversationMessageService.create(
                 conversation.id,
-                `🚀 ${agent.name} started working on "${ticket.title}"`,
+                `🚀 ${agent.name} started working on "${persistedTicket.title}"`,
                 'system',
             );
 
@@ -357,9 +363,9 @@ export function TicketSidebar({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ticket: {
-                        id: ticket.id,
-                        title: ticket.title,
-                        description: ticket.description,
+                        id: persistedTicket.id,
+                        title: persistedTicket.title,
+                        description: persistedTicket.description,
                     },
                     agent: {
                         id: agent.id,

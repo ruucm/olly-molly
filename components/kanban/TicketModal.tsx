@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { ActivityLog } from '@/components/activity/ActivityLog';
+import { projectService, ticketService } from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
 
 interface Member {
@@ -197,11 +198,46 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
         setExecuting(true);
 
         try {
+            await Promise.resolve(onSave({
+                title,
+                description: description || null,
+                status,
+                priority,
+                assignee_id: assigneeId || null,
+            }));
+
+            const agent = members.find((member) => member.id === ticket.assignee_id);
+            const project = projectService.getActive();
+            if (!agent || !project) {
+                throw new Error('Missing agent or active project for execution');
+            }
+            const persistedTicket = ticketService.getById(ticket.id);
+            if (!persistedTicket) {
+                throw new Error('Failed to load ticket from database');
+            }
             const res = await fetch('/api/agent/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    ticket_id: ticket.id,
+                    ticket: {
+                        id: persistedTicket.id,
+                        title: persistedTicket.title,
+                        description: persistedTicket.description,
+                    },
+                    agent: {
+                        id: agent.id,
+                        name: agent.name,
+                        role: agent.role,
+                        avatar: agent.avatar,
+                        system_prompt: agent.system_prompt,
+                        can_generate_images: agent.can_generate_images,
+                        can_log_screenshots: agent.can_log_screenshots,
+                    },
+                    project: {
+                        id: project.id,
+                        name: project.name,
+                        path: project.path,
+                    },
                     feedback: feedback.trim() || undefined,
                     provider,
                 }),

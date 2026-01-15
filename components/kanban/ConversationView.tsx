@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Conversation, ConversationMessage } from '@/lib/client-db';
 
 type ConversationWithAgent = Conversation & {
@@ -33,15 +33,26 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
         }
     }, [conversation?.id]);
 
+    const sortedMessages = useMemo(() => {
+        return [...messages].sort((a, b) => {
+            const timeA = new Date(a.created_at).getTime();
+            const timeB = new Date(b.created_at).getTime();
+            if (timeA !== timeB) {
+                return timeA - timeB;
+            }
+            return a.id.localeCompare(b.id);
+        });
+    }, [messages]);
+
     // Scroll to bottom: once on initial load, then only when running
     useEffect(() => {
-        if (!hasInitiallyScrolled && messages.length > 0) {
+        if (!hasInitiallyScrolled && sortedMessages.length > 0) {
             messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
             setHasInitiallyScrolled(true);
         } else if (isRunning) {
             messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
-    }, [messages, isRunning, hasInitiallyScrolled]);
+    }, [sortedMessages, isRunning, hasInitiallyScrolled]);
 
     if (!conversation) {
         return (
@@ -157,12 +168,12 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                {messages.length === 0 ? (
+                {sortedMessages.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-muted">
                         <p>No messages yet...</p>
                     </div>
                 ) : (
-                    messages.map((message) => (
+                    sortedMessages.map((message) => (
                         <div
                             key={message.id}
                             className={`pmargin-bottom: 2px; rounded-lg border p-2 font-mono text-xs whitespace-pre-wrap break-words ${getMessageTypeClass(message.message_type)}`}
