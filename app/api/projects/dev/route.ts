@@ -171,13 +171,13 @@ function detectExternalDevServerWindows(targetPath: string): { running: boolean;
                 if (cmdLower.includes(normalizedTarget)) {
                     // Found a node process in our target directory
                     // Return the first common dev server port (3000-3999, 4000-4999, 5000-5999, 8000-8999)
-                    const devPort = ports.find(p => 
-                        (p >= 3000 && p < 4000) || 
-                        (p >= 4000 && p < 5000) || 
-                        (p >= 5000 && p < 6000) || 
+                    const devPort = ports.find(p =>
+                        (p >= 3000 && p < 4000) ||
+                        (p >= 4000 && p < 5000) ||
+                        (p >= 5000 && p < 6000) ||
                         (p >= 8000 && p < 9000)
                     ) || ports[0];
-                    
+
                     return { running: true, port: devPort, pid };
                 }
 
@@ -272,7 +272,7 @@ function detectExternalDevServerUnix(targetPath: string): { running: boolean; po
  */
 function detectExternalDevServer(targetPath: string): { running: boolean; port?: number; pid?: number } {
     const isWindows = process.platform === 'win32';
-    
+
     if (isWindows) {
         return detectExternalDevServerWindows(targetPath);
     } else {
@@ -431,6 +431,12 @@ export async function POST(request: NextRequest) {
                 shell: true,
                 stdio: ['ignore', 'pipe', 'pipe'],
                 detached: false,
+                env: {
+                    ...process.env,
+                    NODE_ENV: 'development',
+                    // Ensure FORCE_COLOR is set for better DX if it wasn't already
+                    FORCE_COLOR: '1',
+                },
             });
 
             const serverInfo = {
