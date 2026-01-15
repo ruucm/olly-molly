@@ -88,8 +88,9 @@ function getLocalVersion() {
 
 const CUSTOM_PROFILES_DIR = path.join(APP_DIR, 'custom-profiles');
 
-function hasProductionBuild() {
-    return fs.existsSync(path.join(APP_DIR, '.next', 'BUILD_ID'));
+function hasProductionBuild(standaloneServerPath) {
+    return fs.existsSync(path.join(APP_DIR, '.next', 'BUILD_ID')) ||
+        fs.existsSync(standaloneServerPath);
 }
 
 function backupUserData() {
@@ -195,7 +196,7 @@ async function main() {
     }
 
     // Build
-    if (needsBuild || !hasProductionBuild()) {
+    if (needsBuild || !hasProductionBuild(standaloneServerPath)) {
         console.log('\n🔨 Building...\n');
         execSync('npm run build', { cwd: APP_DIR, stdio: 'inherit' });
     }
