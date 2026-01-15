@@ -1,10 +1,19 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Conversation, ConversationMessage } from '@/lib/db';
+import type { Conversation, ConversationMessage } from '@/lib/client-db';
+
+type ConversationWithAgent = Conversation & {
+    agent?: {
+        id: string;
+        name: string;
+        avatar?: string | null;
+        role?: string;
+    };
+};
 
 interface ConversationViewProps {
-    conversation: Conversation | null;
+    conversation: ConversationWithAgent | null;
     messages: ConversationMessage[];
     isRunning?: boolean;
     jobId?: string | null;

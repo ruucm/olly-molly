@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
+import { memberService, ticketService, useProjects } from '@/lib/client-db';
 
 interface CreatedTicket {
     id: string;
@@ -41,6 +42,9 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
     } | null>(null);
     const [answer, setAnswer] = useState<string | null>(null);
 
+    const projects = useProjects();
+    const project = useMemo(() => projects.find((item) => item.id === projectId) || null, [projects, projectId]);
+
     const handleSubmitRequest = async () => {
         if (!request.trim()) return;
 
@@ -54,6 +58,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                 body: JSON.stringify({
                     request: request.trim(),
                     project_id: projectId,
+                    project_path: project?.path,
                 }),
             });
 
@@ -64,10 +69,32 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
             }
 
             if (data.success) {
+                const createdTickets: CreatedTicket[] = [];
+                for (const task of data.tasks || []) {
+                    const assigneeId = memberService.getByRole(task.assignee_role)?.id || null;
+                    const ticket = ticketService.create({
+                        title: task.title,
+                        description: task.description,
+                        priority: task.priority,
+                        assignee_id: assigneeId || undefined,
+                        project_id: projectId,
+                        created_by: memberService.getByRole('PM')?.id || undefined,
+                    });
+                    const assignee = assigneeId ? memberService.getById(assigneeId) : undefined;
+                    createdTickets.push({
+                        id: ticket.id,
+                        title: ticket.title,
+                        description: ticket.description || '',
+                        priority: ticket.priority,
+                        assigned_role: task.assignee_role,
+                        assignee: assignee ? { name: assignee.name, avatar: assignee.avatar || '' } : undefined,
+                    });
+                }
+
                 setResult({
-                    message: data.message,
+                    message: data.message || `PM이 AI를 사용해 "${request.trim()}" 요청을 분석하여 ${createdTickets.length}개의 태스크를 생성했습니다.`,
                     summary: data.ai_summary,
-                    tickets: data.tickets,
+                    tickets: createdTickets,
                 });
                 onTicketsCreated();
             }
@@ -91,6 +118,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question: question.trim(),
+                    project_path: project?.path,
                 }),
             });
 
@@ -124,6 +152,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         BACKEND_DEV: 'success',
         QA: 'warning',
         DEVOPS: 'default',
+        BUG_HUNTER: 'default',
     };
 
     const roleLabels: Record<string, string> = {
@@ -131,6 +160,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         BACKEND_DEV: 'Backend',
         QA: 'QA',
         DEVOPS: 'DevOps',
+        BUG_HUNTER: 'Bug Hunter',
     };
 
     return (

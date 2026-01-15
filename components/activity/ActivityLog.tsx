@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo } from 'react';
+import { useActivityLogs, useMembers } from '@/lib/client-db';
 
 interface ActivityLog {
     id: string;
@@ -24,33 +25,18 @@ interface ActivityLogProps {
 }
 
 export function ActivityLog({ ticketId }: ActivityLogProps) {
-    const [logs, setLogs] = useState<ActivityLog[]>([]);
-    const [loading, setLoading] = useState(true);
+    const logs = useActivityLogs(ticketId);
+    const members = useMembers();
+    const membersById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
 
-    useEffect(() => {
-        async function fetchLogs() {
-            try {
-                const res = await fetch(`/api/tickets/${ticketId}/logs`);
-                const data = await res.json();
-                setLogs(data);
-            } catch (error) {
-                console.error('Failed to fetch logs:', error);
-            } finally {
-                setLoading(false);
-            }
-        }
-        fetchLogs();
-    }, [ticketId]);
+    const hydratedLogs = useMemo(() => {
+        return logs.map((log) => ({
+            ...log,
+            member: log.member_id ? membersById.get(log.member_id) : undefined,
+        }));
+    }, [logs, membersById]);
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-4">
-                <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-        );
-    }
-
-    if (logs.length === 0) {
+    if (hydratedLogs.length === 0) {
         return (
             <p className="text-sm text-[var(--text-muted)] text-center py-4">No activity yet</p>
         );
@@ -79,7 +65,7 @@ export function ActivityLog({ ticketId }: ActivityLogProps) {
 
     return (
         <div className="space-y-3">
-            {logs.map((log) => (
+            {hydratedLogs.map((log) => (
                 <div key={log.id} className="flex gap-3 text-sm">
                     <span className="text-lg">{getActionIcon(log.action)}</span>
                     <div className="flex-1 min-w-0">

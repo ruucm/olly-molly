@@ -121,7 +121,17 @@ function resolveRelativePath(basePath: string, relativePath: string): string {
     return nextSegments.join('/');
 }
 
-function MarkdownViewer({ content, projectId, filePath }: { content: string; projectId: string; filePath: string }) {
+function MarkdownViewer({
+    content,
+    projectId,
+    projectPath,
+    filePath,
+}: {
+    content: string;
+    projectId: string;
+    projectPath?: string | null;
+    filePath: string;
+}) {
     return (
         <div className="markdown-viewer max-w-4xl mx-auto">
             <ReactMarkdown
@@ -132,9 +142,10 @@ function MarkdownViewer({ content, projectId, filePath }: { content: string; pro
                             return null;
                         }
                         const resolved = resolveRelativePath(filePath, src);
+                        const projectPathParam = projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : '';
                         const imageSrc = resolved.startsWith('http') || resolved.startsWith('data:')
                             ? resolved
-                            : `/api/projects/files/raw?projectId=${projectId}&path=${encodeURIComponent(resolved)}`;
+                            : `/api/projects/files/raw?projectId=${projectId}${projectPathParam}&path=${encodeURIComponent(resolved)}`;
                         return (
                             <img
                                 src={imageSrc}
@@ -200,7 +211,8 @@ export function ProjectArtifactsModal({
         setDirectoryLoading(true);
         setError(null);
         try {
-            const res = await fetch(`/api/projects/files?projectId=${projectId}&path=${encodeURIComponent(targetPath)}`);
+            const projectPathParam = projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : '';
+            const res = await fetch(`/api/projects/files?projectId=${projectId}${projectPathParam}&path=${encodeURIComponent(targetPath)}`);
             const data = (await res.json()) as FileApiResponse;
             if (!res.ok || data.type !== 'directory') {
                 const message = (data as { error?: string }).error || 'Failed to load directory';
@@ -214,14 +226,15 @@ export function ProjectArtifactsModal({
         } finally {
             setDirectoryLoading(false);
         }
-    }, [projectId]);
+    }, [projectId, projectPath]);
 
     const loadFile = useCallback(async (targetPath: string) => {
         if (!projectId) return;
         setFileLoading(true);
         setError(null);
         try {
-            const res = await fetch(`/api/projects/files?projectId=${projectId}&path=${encodeURIComponent(targetPath)}`);
+            const projectPathParam = projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : '';
+            const res = await fetch(`/api/projects/files?projectId=${projectId}${projectPathParam}&path=${encodeURIComponent(targetPath)}`);
             const data = (await res.json()) as FileApiResponse;
             if (!res.ok || data.type !== 'file') {
                 const message = (data as { error?: string }).error || 'Failed to load file';
@@ -233,7 +246,7 @@ export function ProjectArtifactsModal({
         } finally {
             setFileLoading(false);
         }
-    }, [projectId]);
+    }, [projectId, projectPath]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -260,7 +273,8 @@ export function ProjectArtifactsModal({
         setSitesLoading(true);
         setSitesError(null);
         try {
-            const res = await fetch(`/api/projects/sites?projectId=${projectId}`);
+            const projectPathParam = projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : '';
+            const res = await fetch(`/api/projects/sites?projectId=${projectId}${projectPathParam}`);
             const data = await res.json();
             if (!res.ok) {
                 throw new Error(data.error || 'Failed to load sites');
@@ -271,14 +285,15 @@ export function ProjectArtifactsModal({
         } finally {
             setSitesLoading(false);
         }
-    }, [projectId]);
+    }, [projectId, projectPath]);
 
     const loadGit = useCallback(async () => {
         if (!projectId) return;
         setGitLoading(true);
         setGitError(null);
         try {
-            const res = await fetch(`/api/projects/git?projectId=${projectId}`);
+            const projectPathParam = projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : '';
+            const res = await fetch(`/api/projects/git?projectId=${projectId}${projectPathParam}`);
             const data = await res.json();
             if (!res.ok) {
                 throw new Error(data.error || 'Failed to load git history');
@@ -289,7 +304,7 @@ export function ProjectArtifactsModal({
         } finally {
             setGitLoading(false);
         }
-    }, [projectId]);
+    }, [projectId, projectPath]);
 
     useEffect(() => {
         if (!isOpen || activeTab !== 'sites') return;
@@ -330,7 +345,7 @@ export function ProjectArtifactsModal({
             const res = await fetch('/api/projects/git', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ projectId, action: 'checkout', target }),
+                body: JSON.stringify({ projectId, projectPath, action: 'checkout', target }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -353,7 +368,7 @@ export function ProjectArtifactsModal({
             const res = await fetch('/api/projects/git', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ projectId, action, ...payload }),
+                body: JSON.stringify({ projectId, projectPath, action, ...payload }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -371,7 +386,7 @@ export function ProjectArtifactsModal({
         } finally {
             setGitActionLoading(null);
         }
-    }, [projectId, loadGit]);
+    }, [projectId, projectPath, loadGit]);
 
     const selectedExtension = selectedFile?.entry.extension || '';
     const isMarkdown = MARKDOWN_EXTENSIONS.has(selectedExtension);
@@ -381,7 +396,7 @@ export function ProjectArtifactsModal({
     const fileMeta = selectedFile?.entry;
     const fileContent = selectedFile?.content ?? '';
     const filePreviewUrl = selectedFile
-        ? `/api/projects/files/raw?projectId=${projectId || ''}&path=${encodeURIComponent(selectedFile.entry.path)}`
+        ? `/api/projects/files/raw?projectId=${projectId || ''}${projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : ''}&path=${encodeURIComponent(selectedFile.entry.path)}`
         : '';
 
     const rootArtifacts = currentPath === ''
@@ -600,6 +615,7 @@ export function ProjectArtifactsModal({
                                                                             <MarkdownViewer
                                                                                 content={fileContent}
                                                                                 projectId={projectId || ''}
+                                                                                projectPath={projectPath}
                                                                                 filePath={selectedFile.entry.path}
                                                                             />
                                                                         </div>
@@ -665,6 +681,7 @@ export function ProjectArtifactsModal({
                                                                 <MarkdownViewer
                                                                     content={fileContent}
                                                                     projectId={projectId || ''}
+                                                                    projectPath={projectPath}
                                                                     filePath={selectedFile.entry.path}
                                                                 />
                                                             </div>
@@ -982,6 +999,7 @@ export function ProjectArtifactsModal({
                                                             <DevServerControl
                                                                 projectId={projectId}
                                                                 projectName={projectName || null}
+                                                                projectPath={projectPath || null}
                                                                 relativePath={site.path}
                                                             />
                                                         </div>

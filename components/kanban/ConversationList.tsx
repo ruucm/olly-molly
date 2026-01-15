@@ -1,9 +1,18 @@
 'use client';
 
-import type { Conversation } from '@/lib/db';
+import type { Conversation } from '@/lib/client-db';
+
+type ConversationWithAgent = Conversation & {
+    agent?: {
+        id: string;
+        name: string;
+        avatar?: string | null;
+        role?: string;
+    };
+};
 
 interface ConversationListProps {
-    conversations: Conversation[];
+    conversations: ConversationWithAgent[];
     selectedId: string | null;
     onSelect: (id: string) => void;
 }

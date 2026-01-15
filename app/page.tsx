@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { KanbanBoard, TicketSidebar } from '@/components/kanban';
 import { TeamPanel } from '@/components/team';
@@ -10,6 +10,17 @@ import { ProjectSelector, DevServerControl, ProjectArtifactsModal } from '@/comp
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import packageJson from '@/package.json';
+import {
+  initClientDb,
+  useMembers,
+  useTickets,
+  memberService,
+  ticketService,
+  projectService,
+  type Member,
+  type Ticket,
+  type Project,
+} from '@/lib/client-db';
 
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
 import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
@@ -20,45 +31,35 @@ interface RunningJob {
   agentName: string;
   status: 'running' | 'completed' | 'failed';
 }
-interface Member {
-  id: string;
-  role: string;
-  name: string;
-  avatar?: string | null;
-  profile_image?: string | null; // Added based on common pattern for avatar/profile_image
-  system_prompt: string;
-  is_default: number;
-  can_generate_images: number; // Added as per instruction
-  can_log_screenshots: number;
-  created_at?: string; // Added based on common pattern for timestamps
-  updated_at?: string; // Added based on common pattern for timestamps
-}
-
-interface Ticket {
-  id: string;
-  title: string;
-  description?: string | null;
+type UiTicket = Omit<Ticket, 'status' | 'priority'> & {
   status: string;
   priority: string;
-  assignee_id?: string | null;
   assignee?: Member | null;
-}
+};
 
-interface Project {
+type BoardMember = {
   id: string;
   name: string;
-  path: string;
-  is_active: number;
-}
+  avatar?: string | null;
+  role: string;
+  system_prompt: string;
+  is_default: number;
+  can_generate_images: number;
+  can_log_screenshots: number;
+};
+
+type TeamMember = BoardMember;
+
+type BoardTicket = Omit<UiTicket, 'assignee'> & {
+  assignee?: BoardMember | null;
+};
 
 export default function Dashboard() {
-  const [members, setMembers] = useState<Member[]>([]);
-  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pmModalOpen, setPmModalOpen] = useState(false);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<BoardTicket | null>(null);
   const [ticketSidebarOpen, setTicketSidebarOpen] = useState(false);
   const [artifactsModalOpen, setArtifactsModalOpen] = useState(false);
 
@@ -66,6 +67,25 @@ export default function Dashboard() {
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
   const appVersion = packageJson.version;
+
+  const members = useMembers();
+  const allTickets = useTickets();
+
+  const membersById = useMemo(() => {
+    return new Map(members.map((member) => [member.id, member]));
+  }, [members]);
+
+  const activeProjectId = activeProject?.id;
+
+  const tickets = useMemo<BoardTicket[]>(() => {
+    const filtered = activeProjectId
+      ? allTickets.filter((ticket) => ticket.project_id === activeProjectId)
+      : allTickets;
+    return filtered.map((ticket) => ({
+      ...ticket,
+      assignee: ticket.assignee_id ? membersById.get(ticket.assignee_id) || null : null,
+    }));
+  }, [allTickets, activeProjectId, membersById]);
 
 
 
@@ -99,45 +119,26 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch data
-  const fetchData = useCallback(async (projectId?: string) => {
-    try {
-      const ticketUrl = projectId
-        ? `/api/tickets?projectId=${projectId}`
-        : '/api/tickets';
-      const [membersRes, ticketsRes] = await Promise.all([
-        fetch('/api/members'),
-        fetch(ticketUrl),
-      ]);
-      const [membersData, ticketsData] = await Promise.all([
-        membersRes.json(),
-        ticketsRes.json(),
-      ]);
-      setMembers(membersData);
-      setTickets(ticketsData);
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    initClientDb()
+      .catch((error) => {
+        console.error('Failed to initialize local database:', error);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
-  useEffect(() => {
-    fetchData(activeProject?.id);
-  }, [fetchData, activeProject]);
-
-  const handleTicketCreate = useCallback(async (data: Partial<Ticket>) => {
+  const handleTicketCreate = useCallback(async (data: Partial<BoardTicket>) => {
     try {
-      const res = await fetch('/api/tickets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...data,
-          project_id: activeProject?.id,
-        }),
+      const newTicket = ticketService.create({
+        title: data.title || 'New Ticket',
+        description: data.description || undefined,
+        priority: data.priority as Ticket['priority'] | undefined,
+        assignee_id: data.assignee_id || undefined,
+        project_id: activeProject?.id,
+        created_by: data.created_by ?? undefined,
       });
-      const newTicket = await res.json();
-      setTickets(prev => [newTicket, ...prev]);
       return newTicket as Ticket;
     } catch (error) {
       console.error('Failed to create ticket:', error);
@@ -145,42 +146,44 @@ export default function Dashboard() {
     }
   }, [activeProject]);
 
-  const handleTicketUpdate = useCallback(async (id: string, data: Partial<Ticket>) => {
+  const handleTicketUpdate = useCallback(async (id: string, data: Partial<BoardTicket>) => {
     try {
-      const res = await fetch(`/api/tickets/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+      ticketService.update(id, {
+        title: data.title,
+        description: data.description,
+        status: data.status as Ticket['status'] | undefined,
+        priority: data.priority as Ticket['priority'] | undefined,
+        assignee_id: data.assignee_id ?? undefined,
       });
-      const updatedTicket = await res.json();
-      setTickets(prev => prev.map(t => t.id === id ? updatedTicket : t));
     } catch (error) {
       console.error('Failed to update ticket:', error);
     }
   }, []);
+  const handleTicketsReorder = useCallback(() => {
+    // Order is derived from status/priority; no local ordering to persist yet.
+  }, []);
 
   const handleTicketDelete = useCallback(async (id: string) => {
     try {
-      await fetch(`/api/tickets/${id}`, { method: 'DELETE' });
-      setTickets(prev => prev.filter(t => t.id !== id));
+      ticketService.delete(id);
     } catch (error) {
       console.error('Failed to delete ticket:', error);
     }
   }, []);
 
-  const handleMemberUpdate = useCallback((updatedMember: Member) => {
-    setMembers(prev => prev.map(m => m.id === updatedMember.id ? updatedMember : m));
+  const handleMemberUpdate = useCallback((updatedMember: TeamMember) => {
+    memberService.update(updatedMember.id, {
+      name: updatedMember.name,
+      avatar: updatedMember.avatar || null,
+      system_prompt: updatedMember.system_prompt,
+      can_generate_images: updatedMember.can_generate_images,
+      can_log_screenshots: updatedMember.can_log_screenshots,
+    });
   }, []);
 
   const handleMemberCreate = useCallback(async (data: { role: string; name: string; avatar: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean }) => {
     try {
-      const res = await fetch('/api/members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const newMember = await res.json();
-      setMembers(prev => [...prev, newMember]);
+      memberService.create(data);
     } catch (error) {
       console.error('Failed to create member:', error);
       alert('Failed to create member. Please try again.');
@@ -189,15 +192,10 @@ export default function Dashboard() {
 
   const handleMemberDelete = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/members/${id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        alert(error.error || 'Failed to delete member');
-        return;
+      const result = memberService.delete(id);
+      if (!result.success) {
+        alert(result.error || 'Failed to delete member');
       }
-      setMembers(prev => prev.filter(m => m.id !== id));
     } catch (error) {
       console.error('Failed to delete member:', error);
       alert('Failed to delete member. Please try again.');
@@ -205,16 +203,20 @@ export default function Dashboard() {
   }, []);
 
   const handlePMTicketsCreated = useCallback(() => {
-    fetchData(activeProject?.id); // Refresh all data for current project
-  }, [fetchData, activeProject]);
+    if (activeProject?.id) {
+      projectService.setActive(activeProject.id);
+    }
+  }, [activeProject]);
 
   const handleProjectChange = useCallback((project: Project | null) => {
     setActiveProject(project);
   }, []);
 
   const handleRefresh = useCallback(() => {
-    fetchData(activeProject?.id);
-  }, [fetchData, activeProject]);
+    if (activeProject?.id) {
+      projectService.setActive(activeProject.id);
+    }
+  }, [activeProject]);
 
 
 
@@ -269,7 +271,11 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-2">
             <ProjectSelector onProjectChange={handleProjectChange} />
-            <DevServerControl projectId={activeProject?.id || null} projectName={activeProject?.name || null} />
+            <DevServerControl
+              projectId={activeProject?.id || null}
+              projectName={activeProject?.name || null}
+              projectPath={activeProject?.path || null}
+            />
             <Button
               variant="ghost"
               size="sm"
@@ -331,11 +337,12 @@ export default function Dashboard() {
                 onTicketCreate={handleTicketCreate}
                 onTicketUpdate={handleTicketUpdate}
                 onTicketDelete={handleTicketDelete}
-                onTicketsReorder={setTickets}
+                  onTicketsReorder={handleTicketsReorder}
                 hasActiveProject={!!activeProject}
                 onRefresh={handleRefresh}
                 onTicketSelect={(ticket) => {
-                  setSelectedTicket(ticket);
+                  const fullTicket = tickets.find((item) => item.id === ticket.id) || ticket;
+                  setSelectedTicket(fullTicket as BoardTicket);
                   setTicketSidebarOpen(true);
                 }}
               />

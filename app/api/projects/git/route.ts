@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { projectService } from '@/lib/db';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -157,28 +156,28 @@ async function resolveGraphRef(projectPath: string, status: ParsedGitStatus): Pr
     }
 }
 
-function resolveProject(projectId: string | null) {
-    const project = projectId ? projectService.getById(projectId) : projectService.getActive();
-    if (!project) {
+function resolveProject(projectPath: string | null) {
+    if (!projectPath) {
         return null;
     }
-    if (!fs.existsSync(project.path) || !fs.statSync(project.path).isDirectory()) {
+    if (!fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) {
         return null;
     }
-    return project;
+    return { path: projectPath };
 }
 
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const projectId = searchParams.get('projectId');
+        const projectPath = searchParams.get('projectPath');
         const limitParam = searchParams.get('limit');
         const limit = Math.min(
             Math.max(Number.parseInt(limitParam || String(DEFAULT_LOG_LIMIT), 10) || DEFAULT_LOG_LIMIT, 1),
             MAX_LOG_LIMIT
         );
 
-        const project = resolveProject(projectId);
+        const project = resolveProject(projectPath);
         if (!project) {
             return NextResponse.json({ error: 'Project not found' }, { status: 404 });
         }
@@ -237,11 +236,12 @@ export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
         const projectId = typeof body.projectId === 'string' ? body.projectId : null;
+        const projectPath = typeof body.projectPath === 'string' ? body.projectPath : null;
         const action = typeof body.action === 'string' ? body.action : 'checkout';
         const target = typeof body.target === 'string' ? body.target.trim() : '';
         const message = typeof body.message === 'string' ? body.message.trim() : '';
 
-        const project = resolveProject(projectId);
+        const project = resolveProject(projectPath);
         if (!project) {
             return NextResponse.json({ error: 'Project not found' }, { status: 404 });
         }

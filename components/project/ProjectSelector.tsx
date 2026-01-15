@@ -1,18 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
+import { projectService, useProjects, type Project } from '@/lib/client-db';
 
-
-interface Project {
-    id: string;
-    name: string;
-    path: string;
-    description: string | null;
-    is_active: number;
-}
 
 interface ProjectSelectorProps {
     onProjectChange?: (project: Project | null) => void;
@@ -21,7 +14,6 @@ interface ProjectSelectorProps {
 type TabType = 'existing' | 'create' | 'empty';
 
 export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
-    const [projects, setProjects] = useState<Project[]>([]);
     const [activeProject, setActiveProject] = useState<Project | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<TabType>('empty');
@@ -58,30 +50,25 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         }
     };
 
-    useEffect(() => {
-        fetchProjects();
-    }, []);
+    const projects = useProjects();
 
-    const fetchProjects = async () => {
-        try {
-            const res = await fetch('/api/projects');
-            const data = await res.json();
-            setProjects(data);
-            const storedId = getStoredProjectId();
-            const storedProject = storedId ? data.find((p: Project) => p.id === storedId) : null;
-            const active = storedProject || data.find((p: Project) => p.is_active) || null;
-            if (storedId && !storedProject) {
-                persistProjectId(null);
-            }
-            if (active?.id && active.id !== storedId) {
-                persistProjectId(active.id);
-            }
-            setActiveProject(active);
-            onProjectChange?.(active);
-        } catch (err) {
-            console.error('Failed to fetch projects:', err);
+    const resolvedActiveProject = useMemo(() => {
+        const storedId = getStoredProjectId();
+        const storedProject = storedId ? projects.find((p) => p.id === storedId) : null;
+        const active = storedProject || projects.find((p) => p.is_active) || null;
+        if (storedId && !storedProject) {
+            persistProjectId(null);
         }
-    };
+        if (active?.id && active.id !== storedId) {
+            persistProjectId(active.id);
+        }
+        return active;
+    }, [projects]);
+
+    useEffect(() => {
+        setActiveProject(resolvedActiveProject);
+        onProjectChange?.(resolvedActiveProject);
+    }, [resolvedActiveProject, onProjectChange]);
 
     const handleAddProject = async () => {
         if (!newPath.trim()) return;
@@ -105,13 +92,17 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                 throw new Error(data.error);
             }
 
+            const project = projectService.create({
+                name: data.name || newName.trim() || newPath.trim().split('/').pop() || 'Project',
+                path: data.path || newPath.trim(),
+                description: data.description || (data.is_git_repo ? 'Git repository' : 'Local project'),
+            });
             setNewPath('');
             setNewName('');
-            await fetchProjects();
 
             // Auto-select if it's the first project
             if (projects.length === 0) {
-                handleSelectProject(data.id);
+                handleSelectProject(project.id);
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to add project');
@@ -145,12 +136,20 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
 
             setCreateName('');
             setCreateProgress(null);
-            await fetchProjects();
 
             // Auto-select the new project
-            if (data.project?.id) {
-                handleSelectProject(data.project.id);
-            }
+            const project = data.project
+                ? projectService.create({
+                    name: data.project.name,
+                    path: data.project.path,
+                    description: data.project.description || 'Next.js project',
+                })
+                : projectService.create({
+                    name: createName.trim(),
+                    path: data.path || `~/Projects/${createName.trim()}`,
+                    description: 'Next.js project',
+                });
+            handleSelectProject(project.id);
 
             alert(`✅ 프로젝트가 생성되었습니다!\n경로: ~/Projects/${createName.trim()}`);
         } catch (err) {
@@ -186,11 +185,13 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
 
             setEmptyName('');
             setEmptyParentPath('');
-            await fetchProjects();
 
-            if (data.id) {
-                handleSelectProject(data.id);
-            }
+            const project = projectService.create({
+                name: data.name || emptyName.trim(),
+                path: data.path,
+                description: data.description || 'Empty project',
+            });
+            handleSelectProject(project.id);
         } catch (err) {
             setEmptyError(err instanceof Error ? err.message : 'Failed to create project');
         } finally {
@@ -200,16 +201,8 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
 
     const handleSelectProject = async (id: string) => {
         try {
-            const res = await fetch(`/api/projects/${id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ is_active: true }),
-            });
-
-            if (res.ok) {
-                persistProjectId(id);
-                await fetchProjects();
-            }
+            projectService.setActive(id);
+            persistProjectId(id);
         } catch (err) {
             console.error('Failed to select project:', err);
         }
@@ -217,8 +210,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
 
     const handleDeleteProject = async (id: string) => {
         try {
-            await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-            await fetchProjects();
+            projectService.delete(id);
         } catch (err) {
             console.error('Failed to delete project:', err);
         }

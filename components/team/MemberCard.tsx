@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { ProfileImageModal } from './ProfileImageModal';
+import { memberService } from '@/lib/client-db';
 
 interface Member {
     id: string;
@@ -95,7 +96,7 @@ interface SystemPromptEditorProps {
     isOpen: boolean;
     onClose: () => void;
     member: Member | null;
-    onSave: (member: Member) => void;
+    onSave: (member: Member) => Promise<void> | void;
     onProfileImageChange?: (id: string, imagePath: string) => void;
     onDelete?: (id: string) => void;
 }
@@ -130,33 +131,14 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
 
     const handleSave = async () => {
         if (member) {
-            // If onSave is async/supports capabilities, update it properly
-            // Here we assume onSave handles content update, but for extended props we might need direct API call
-            // or onSave update. Ideally onSave should pass all mutable fields.
-            // For now, let's update capability separately if onSave doesn't support it, 
-            // BUT actually page.tsx handleMemberUpdate only takes systemPrompt.
-            // So we need to do a separate fetch for capability or update handleMemberUpdate.
-            // Let's do a direct fetch here to ensure it works without changing page.tsx signature too much?
-            // Or better, handleMemberUpdate in page.tsx could be flexible.
-            // Let's rely on parallel update for now:
-
             try {
-                const response = await fetch(`/api/members/${member.id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        system_prompt: prompt,
-                        can_generate_images: canGenerateImages ? 1 : 0,
-                        can_log_screenshots: canLogScreenshots ? 1 : 0
-                    }),
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to update member');
-                }
-
-                const updatedMember = await response.json();
-                onSave(updatedMember);
+                const updatedMember: Member = {
+                    ...member,
+                    system_prompt: prompt,
+                    can_generate_images: canGenerateImages ? 1 : 0,
+                    can_log_screenshots: canLogScreenshots ? 1 : 0,
+                };
+                await onSave(updatedMember);
                 onClose();
             } catch (error) {
                 console.error('Failed to update member:', error);
@@ -200,12 +182,7 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
                 if (onProfileImageChange) {
                     onProfileImageChange(member.id, result.path);
                 } else {
-                    // Fallback: update via PATCH
-                    await fetch(`/api/members/${member.id}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ profile_image: result.path }),
-                    });
+                    memberService.update(member.id, { profile_image: result.path });
                 }
             } else {
                 console.error('Upload failed:', result.error);

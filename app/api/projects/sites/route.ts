@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { projectService } from '@/lib/db';
 
 const SKIP_DIRECTORIES = new Set([
     'node_modules',
@@ -70,16 +69,16 @@ export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const projectId = searchParams.get('projectId');
+        const projectPath = searchParams.get('projectPath');
 
-        const project = projectId ? projectService.getById(projectId) : projectService.getActive();
-        if (!project) {
-            return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+        if (!projectPath) {
+            return NextResponse.json({ error: 'Project path is required' }, { status: 400 });
         }
 
-        const packages = scanForPackageJsons(project.path);
+        const packages = scanForPackageJsons(projectPath);
         const sites = packages
             .map(pkg => {
-                const relativePath = toRelativePath(project.path, pkg.dir);
+                const relativePath = toRelativePath(projectPath, pkg.dir);
                 return {
                     id: relativePath || '.',
                     name: pkg.name,
@@ -90,9 +89,8 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({
             project: {
-                id: project.id,
-                name: project.name,
-                path: project.path,
+                id: projectId,
+                path: projectPath,
             },
             sites,
         });

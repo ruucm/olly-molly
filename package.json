@@ -38,7 +38,9 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@tailwindcss/postcss": "^4",
-    "better-sqlite3": "^12.5.0",
+    "@tanstack/db": "^0.5.20",
+    "@tanstack/react-db": "^0.1.64",
+    "idb": "^8.0.0",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -49,7 +51,6 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "20.19.29",
     "@types/react": "^19",
     "@types/react-dom": "^19",

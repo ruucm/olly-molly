@@ -1,13 +1,20 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
-import type { Conversation, ConversationMessage } from '@/lib/db';
+import {
+    conversationMessageService,
+    conversationService,
+    projectService,
+    useConversationMessages,
+    useConversations,
+    type Conversation,
+} from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
 
 interface Member {
@@ -113,9 +120,9 @@ export function TicketSidebar({
     const [showAgentControls, setShowAgentControls] = useState(false);
 
     // Conversations
-    const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-    const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+    const conversations = useConversations(ticket?.id || '');
+    const conversationMessages = useConversationMessages(selectedConversationId);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -129,7 +136,6 @@ export function TicketSidebar({
         if (typeof window === 'undefined') return;
         window.localStorage.setItem('agentProvider', provider);
     }, [provider]);
-    const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     // Update form fields when ticket changes
     useEffect(() => {
@@ -146,103 +152,154 @@ export function TicketSidebar({
         }
     }, [ticket?.id]);
 
-    // Fetch conversations when ticket changes
+    const sortedConversations = useMemo(() => {
+        return [...conversations].sort((a, b) => {
+            const aTime = new Date(a.started_at).getTime();
+            const bTime = new Date(b.started_at).getTime();
+            return bTime - aTime;
+        });
+    }, [conversations]);
+
+    const membersById = useMemo(() => {
+        return new Map(members.map((member) => [member.id, member]));
+    }, [members]);
+
+    const conversationsWithAgent = useMemo(() => {
+        return sortedConversations.map((conversation) => ({
+            ...conversation,
+            agent: membersById.get(conversation.agent_id),
+        }));
+    }, [sortedConversations, membersById]);
+
     useEffect(() => {
         if (!ticket) {
-            setConversations([]);
             setSelectedConversationId(null);
             return;
         }
-
-        const fetchConversations = async () => {
-            try {
-                const res = await fetch(`/api/conversations?ticket_id=${ticket.id}`);
-                const data = await res.json();
-                setConversations(data.conversations || []);
-
-                // Auto-select the most recent conversation if none selected
-                if (!selectedConversationId && data.conversations?.length > 0) {
-                    setSelectedConversationId(data.conversations[0].id);
-                }
-            } catch (error) {
-                console.error('Failed to fetch conversations:', error);
-            }
-        };
-
-        fetchConversations();
-        // Poll every 2 seconds to keep conversations updated
-        const interval = setInterval(fetchConversations, 2000);
-        return () => clearInterval(interval);
-    }, [ticket, selectedConversationId]);
-
-    // Fetch messages for selected conversation
-    useEffect(() => {
-        if (!selectedConversationId) {
-            setConversationMessages([]);
-            return;
+        if (!selectedConversationId && sortedConversations.length > 0) {
+            setSelectedConversationId(sortedConversations[0].id);
         }
+    }, [ticket, selectedConversationId, sortedConversations]);
 
-        let isCancelled = false;
-        let wasRunning = false;
+    const lastOutputRef = useRef<string>('');
 
-        const fetchMessages = async () => {
-            if (isCancelled) return;
+    useEffect(() => {
+        if (!currentJobId || !selectedConversationId) return;
 
+        let cancelled = false;
+
+        const pollOutput = async () => {
             try {
-                const res = await fetch(`/api/conversations/${selectedConversationId}`);
+                const res = await fetch(`/api/agent/status?job_id=${currentJobId}`);
                 const data = await res.json();
+                if (cancelled) return;
 
-                if (isCancelled) return;
-
-                setConversationMessages(data.messages || []);
-
-                const isCurrentlyRunning = data.conversation?.status === 'running';
-
-                // Check if conversation is still running
-                if (isCurrentlyRunning) {
-                    setExecuting(true);
-                    wasRunning = true;
-                } else {
-                    setExecuting(false);
-                    // If conversation just completed (was running, now not), refresh ticket status
-                    if (wasRunning && ticket && !isCancelled) {
-                        wasRunning = false;
-                        // Fetch updated ticket status
-                        const ticketRes = await fetch(`/api/tickets/${ticket.id}`);
-                        const ticketData = await ticketRes.json();
-                        if (ticketData.status && !isCancelled) {
-                            setStatus(ticketData.status);
-                            onTicketUpdate(ticket.id, { status: ticketData.status });
-
-                            // Show web notification when agent completes work
-                            if (ticketData.status === 'IN_REVIEW' && ticket.assignee) {
-                                const agentName = ticket.assignee.name;
-                                const agentIcon = roleProfileImages[ticket.assignee.role] || '/app-icon.png';
-                                showNotification(
-                                    `✅ ${agentName} 작업 완료!`,
-                                    `"${ticket.title}" 작업이 완료되어 리뷰 대기 중입니다.`,
-                                    agentIcon
-                                );
-                            }
-                        }
-                    }
+                const output = typeof data.output === 'string' ? data.output : '';
+                const previous = lastOutputRef.current;
+                if (output.length > previous.length) {
+                    const delta = output.slice(previous.length);
+                    conversationMessageService.create(selectedConversationId, delta, 'log');
+                    lastOutputRef.current = output;
                 }
             } catch (error) {
-                console.error('Failed to fetch messages:', error);
+                console.error('Failed to fetch job output:', error);
             }
         };
 
-        fetchMessages();
-        // Poll faster for real-time updates (500ms)
-        pollIntervalRef.current = setInterval(fetchMessages, 500);
+        pollOutput();
+        const interval = setInterval(pollOutput, 1000);
 
         return () => {
-            isCancelled = true;
-            if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [currentJobId, selectedConversationId]);
+
+    useEffect(() => {
+        if (!ticket?.id || !selectedConversationId) return;
+
+        let cancelled = false;
+        let wasRunning = false;
+
+        const pollStatus = async () => {
+            try {
+                const res = await fetch(`/api/agent/status?ticket_id=${ticket.id}`);
+                const data = await res.json();
+                if (cancelled) return;
+
+                const job = data.job;
+                if (!job) {
+                    if (wasRunning) {
+                        setExecuting(false);
+                        setCurrentJobId(null);
+                        wasRunning = false;
+                    }
+                    return;
+                }
+
+                const isRunning = job.status === 'running';
+                setExecuting(isRunning);
+                if (isRunning) {
+                    wasRunning = true;
+                    if (!currentJobId) {
+                        setCurrentJobId(job.id);
+                    }
+                    return;
+                }
+
+                if (wasRunning) {
+                    wasRunning = false;
+                    const completionStatus = job.status === 'completed'
+                        ? 'completed'
+                        : job.status === 'failed'
+                            ? 'failed'
+                            : 'cancelled';
+                    const output = typeof job.output === 'string' ? job.output : '';
+                    const commitMatch = output.match(/commit\s+([a-f0-9]{7,40})/i);
+                    const commitHash = commitMatch ? commitMatch[1] : undefined;
+                    conversationService.complete(selectedConversationId, {
+                        status: completionStatus,
+                        git_commit_hash: commitHash,
+                    });
+                    conversationMessageService.create(
+                        selectedConversationId,
+                        completionStatus === 'completed'
+                            ? `✅ Task completed successfully${commitHash ? ` (commit: ${commitHash})` : ''}`
+                            : completionStatus === 'failed'
+                                ? '❌ Task failed'
+                                : '⏹ Job was cancelled by user',
+                        completionStatus === 'completed' ? 'success' : completionStatus === 'failed' ? 'error' : 'system',
+                    );
+
+                    if (completionStatus === 'completed') {
+                        setStatus('IN_REVIEW');
+                        onTicketUpdate(ticket.id, { status: 'IN_REVIEW' });
+                        if (ticket.assignee) {
+                            const agentName = ticket.assignee.name;
+                            const agentIcon = roleProfileImages[ticket.assignee.role] || '/app-icon.png';
+                            showNotification(
+                                `✅ ${agentName} 작업 완료!`,
+                                `"${ticket.title}" 작업이 완료되어 리뷰 대기 중입니다.`,
+                                agentIcon,
+                            );
+                        }
+                    }
+
+                    setCurrentJobId(null);
+                }
+            } catch (error) {
+                console.error('Failed to fetch job status:', error);
             }
         };
-    }, [selectedConversationId, ticket?.id, onTicketUpdate]);
+
+        pollStatus();
+        const interval = setInterval(pollStatus, 2000);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [ticket?.id, selectedConversationId, onTicketUpdate, currentJobId, ticket?.assignee, ticket?.title]);
 
     const persistTicketDetails = async () => {
         if (!ticket) return;
@@ -274,11 +331,51 @@ export function TicketSidebar({
 
         try {
             await persistTicketDetails();
+
+            const agent = members.find((member) => member.id === assigneeId);
+            const project = projectService.getActive();
+
+            if (!agent || !project) {
+                throw new Error('Missing agent or active project for execution');
+            }
+
+            const conversation = conversationService.create({
+                ticket_id: ticket.id,
+                agent_id: agent.id,
+                provider,
+                feedback: feedback.trim() || undefined,
+            });
+
+            conversationMessageService.create(
+                conversation.id,
+                `🚀 ${agent.name} started working on "${ticket.title}"`,
+                'system',
+            );
+
             const res = await fetch('/api/agent/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    ticket_id: ticket.id,
+                    ticket: {
+                        id: ticket.id,
+                        title: ticket.title,
+                        description: ticket.description,
+                    },
+                    agent: {
+                        id: agent.id,
+                        name: agent.name,
+                        role: agent.role,
+                        avatar: agent.avatar,
+                        system_prompt: agent.system_prompt,
+                        can_generate_images: agent.can_generate_images,
+                        can_log_screenshots: agent.can_log_screenshots,
+                    },
+                    project: {
+                        id: project.id,
+                        name: project.name,
+                        path: project.path,
+                    },
+                    conversation_id: conversation.id,
                     feedback: feedback.trim() || undefined,
                     provider,
                 }),
@@ -287,29 +384,15 @@ export function TicketSidebar({
             const data = await res.json();
 
             if (data.success) {
-                // Save job ID for stop functionality
                 if (data.job_id) {
                     setCurrentJobId(data.job_id);
+                    lastOutputRef.current = '';
                 }
 
-                // Refresh conversations to include the new one
-                const convRes = await fetch(`/api/conversations?ticket_id=${ticket.id}`);
-                const convData = await convRes.json();
-                setConversations(convData.conversations || []);
-
-                // Select the new conversation
-                if (data.conversation_id) {
-                    setSelectedConversationId(data.conversation_id);
-                }
-
-                // Clear feedback
+                setSelectedConversationId(conversation.id);
                 setFeedback('');
-
-                // Update ticket status locally and in parent
                 setStatus('IN_PROGRESS');
                 onTicketUpdate(ticket.id, { status: 'IN_PROGRESS' });
-
-                // Close agent controls after execution
                 setShowAgentControls(false);
             } else {
                 alert(data.error || 'Failed to start agent');
@@ -322,7 +405,7 @@ export function TicketSidebar({
     };
 
     const handleStopJob = async () => {
-        if (!currentJobId) return;
+        if (!currentJobId || !selectedConversationId) return;
 
         try {
             const res = await fetch(`/api/agent/status?job_id=${currentJobId}`, {
@@ -331,12 +414,10 @@ export function TicketSidebar({
             const data = await res.json();
 
             if (data.success) {
+                conversationService.complete(selectedConversationId, { status: 'cancelled' });
+                conversationMessageService.create(selectedConversationId, '⏹ Job was cancelled by user', 'system');
                 setExecuting(false);
                 setCurrentJobId(null);
-                // Refresh conversations to show cancelled status
-                const convRes = await fetch(`/api/conversations?ticket_id=${ticket?.id}`);
-                const convData = await convRes.json();
-                setConversations(convData.conversations || []);
             }
         } catch (error) {
             console.error('Failed to stop job:', error);
@@ -350,7 +431,7 @@ export function TicketSidebar({
             .map(m => ({ value: m.id, label: `${m.avatar} ${m.name}` }))
     ];
 
-    const selectedConversation = conversations.find(c => c.id === selectedConversationId) || null;
+    const selectedConversation = conversationsWithAgent.find(c => c.id === selectedConversationId) || null;
     const isConversationRunning = selectedConversation?.status === 'running';
 
     if (!isOpen || !ticket) return null;
@@ -572,7 +653,7 @@ export function TicketSidebar({
                                 <p className="text-xs font-medium text-muted">Execution History</p>
                             </div>
                             <ConversationList
-                                conversations={conversations}
+                                conversations={conversationsWithAgent}
                                 selectedId={selectedConversationId}
                                 onSelect={setSelectedConversationId}
                             />

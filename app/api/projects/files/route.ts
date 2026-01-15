@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { projectService } from '@/lib/db';
 
 const SKIP_DIRECTORIES = new Set([
     'node_modules',
@@ -70,17 +69,16 @@ function readFilePreview(filePath: string, size: number): { buffer: Buffer; trun
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const projectId = searchParams.get('projectId');
+        const projectPath = searchParams.get('projectPath');
         const relativePath = searchParams.get('path');
 
-        const project = projectId ? projectService.getById(projectId) : projectService.getActive();
-        if (!project) {
-            return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+        if (!projectPath) {
+            return NextResponse.json({ error: 'Project path is required' }, { status: 400 });
         }
 
         let targetPath: string;
         try {
-            targetPath = resolveProjectPath(project.path, relativePath);
+            targetPath = resolveProjectPath(projectPath, relativePath);
         } catch {
             return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
         }
@@ -107,7 +105,7 @@ export async function GET(request: NextRequest) {
                 .map(entry => {
                     const entryPath = path.join(targetPath, entry.name);
                     const entryStats = fs.statSync(entryPath);
-                    const relativeEntryPath = toRelativePath(project.path, entryPath);
+                    const relativeEntryPath = toRelativePath(projectPath, entryPath);
                     return {
                         name: entry.name,
                         path: relativeEntryPath,

@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { projectService } from '@/lib/db';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
 export async function GET() {
     try {
-        const projects = projectService.getAll();
-        return NextResponse.json(projects);
+        return NextResponse.json([]);
     } catch (error) {
         console.error('Error fetching projects:', error);
         return NextResponse.json({ error: 'Failed to fetch projects' }, { status: 500 });
@@ -37,13 +35,12 @@ export async function POST(request: NextRequest) {
 
             fs.mkdirSync(projectPath, { recursive: true });
 
-            const project = projectService.create({
+            return NextResponse.json({
                 name: body.name.trim(),
                 path: projectPath,
                 description: body.description || 'Empty project',
-            });
-
-            return NextResponse.json({ ...project, created: true }, { status: 201 });
+                created: true,
+            }, { status: 201 });
         }
 
         if (!body.path) {
@@ -68,13 +65,12 @@ export async function POST(request: NextRequest) {
         // Extract project name from path if not provided
         const name = body.name || path.basename(projectPath);
 
-        const project = projectService.create({
+        return NextResponse.json({
             name,
             path: projectPath,
             description: body.description || (isGitRepo ? 'Git repository' : 'Local project'),
-        });
-
-        return NextResponse.json({ ...project, is_git_repo: isGitRepo }, { status: 201 });
+            is_git_repo: isGitRepo,
+        }, { status: 201 });
     } catch (error) {
         console.error('Error creating project:', error);
         return NextResponse.json({ error: 'Failed to create project' }, { status: 500 });

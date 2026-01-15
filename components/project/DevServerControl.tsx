@@ -5,10 +5,11 @@ import { useState, useEffect, useCallback } from 'react';
 interface DevServerControlProps {
     projectId: string | null;
     projectName: string | null;
+    projectPath?: string | null;
     relativePath?: string | null;
 }
 
-export function DevServerControl({ projectId, projectName, relativePath }: DevServerControlProps) {
+export function DevServerControl({ projectId, projectName, projectPath, relativePath }: DevServerControlProps) {
     const [running, setRunning] = useState(false);
     const [port, setPort] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
@@ -20,6 +21,9 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
 
         try {
             const params = new URLSearchParams({ projectId });
+            if (projectPath) {
+                params.set('projectPath', projectPath);
+            }
             if (relativePath) {
                 params.set('path', relativePath);
             }
@@ -31,7 +35,7 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
         } catch (error) {
             console.error('Failed to check dev server status:', error);
         }
-    }, [projectId, relativePath]);
+    }, [projectId, projectPath, relativePath]);
 
     useEffect(() => {
         checkStatus();
@@ -56,7 +60,7 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
             const res = await fetch('/api/projects/dev', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'start', projectId, path: relativePath || undefined }),
+                body: JSON.stringify({ action: 'start', projectId, projectPath, path: relativePath || undefined }),
             });
 
             const data = await res.json();
@@ -82,7 +86,7 @@ export function DevServerControl({ projectId, projectName, relativePath }: DevSe
             const res = await fetch('/api/projects/dev', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'stop', projectId, path: relativePath || undefined }),
+                body: JSON.stringify({ action: 'stop', projectId, projectPath, path: relativePath || undefined }),
             });
 
             const data = await res.json();

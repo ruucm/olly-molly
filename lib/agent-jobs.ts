@@ -1,7 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { conversationService, conversationMessageService, activityService, ticketService } from './db';
 
 export type AgentProvider = 'claude' | 'opencode' | 'codex';
 
@@ -342,15 +341,17 @@ interface StartJobParams {
     jobId: string;
     conversationId: string;
     ticketId: string;
+    ticketTitle: string;
     agentId: string;
     agentName: string;
+    agentAvatar?: string | null;
     projectPath: string;
     prompt: string;
     provider: AgentProvider;
 }
 
 export function startBackgroundJob(params: StartJobParams): void {
-    const { jobId, conversationId, ticketId, agentId, agentName, projectPath, prompt, provider } = params;
+    const { jobId, conversationId, ticketId, ticketTitle, agentId, agentName, agentAvatar, projectPath, prompt, provider } = params;
 
     // Configure command and args based on provider
     let execPath: string;
@@ -413,9 +414,6 @@ export function startBackgroundJob(params: StartJobParams): void {
 
     runningJobs.set(jobId, job);
 
-    // Log start message to conversation
-    conversationMessageService.create(conversationId, startMessage, 'system');
-
     let stdoutBuffer = '';
     let streamedTextBuffer = '';
     let lastFlushTime = Date.now();
@@ -432,7 +430,6 @@ export function startBackgroundJob(params: StartJobParams): void {
         streamedTextBuffer = '';
         lastFlushTime = now;
         job.output += chunk;
-        conversationMessageService.create(conversationId, chunk, 'log');
     };
 
     const handleClaudeStreamLine = (line: string) => {
@@ -478,8 +475,7 @@ export function startBackgroundJob(params: StartJobParams): void {
         }
 
         job.output += text;
-        // Save to conversation messages
-        conversationMessageService.create(conversationId, text, 'log');
+        // Output is stored in job.output and polled by the client
     });
 
     // Capture stderr
@@ -487,8 +483,7 @@ export function startBackgroundJob(params: StartJobParams): void {
         const text = data.toString('utf-8');
         const errorText = `[stderr] ${text}\n`;
         job.output += errorText;
-        // Save errors to conversation messages
-        conversationMessageService.create(conversationId, text, 'error');
+        // Output is stored in job.output and polled by the client
     });
 
     agentProcess.on('close', (code: number | null) => {
@@ -552,43 +547,11 @@ export function startBackgroundJob(params: StartJobParams): void {
 
         console.log(`[agent-jobs] Task marked as: ${job.status} (code: ${code}, commitHash: ${commitHash}, successIndicators: ${hasSuccessIndicators}, failureIndicators: ${hasFailureIndicators}, claudeSuccess: ${claudeSuccess})`);
 
-        // Update conversation status
-        conversationService.complete(conversationId, {
-            status: success ? 'completed' : 'failed',
-            git_commit_hash: commitHash,
-        });
-
-        // Add completion message
-        const completionMessage = success
-            ? `✅ Task completed successfully${commitHash ? ` (commit: ${commitHash})` : ''}`
-            : '❌ Task failed';
-        conversationMessageService.create(conversationId, completionMessage, success ? 'success' : 'error');
-
-        // Log activity
-        activityService.log({
-            ticket_id: ticketId,
-            member_id: agentId,
-            action: success ? 'AGENT_WORK_COMPLETED' : 'AGENT_WORK_FAILED',
-            new_value: commitHash,
-            details: success
-                ? `${agentName} completed the task${commitHash ? ` (commit: ${commitHash})` : ''}`
-                : `${agentName} failed to complete the task`,
-        });
-
-        // Update ticket status
-        if (success) {
-            ticketService.update(ticketId, { status: 'IN_REVIEW' }, agentId);
-        }
-
-        // Get ticket info for work log
-        const ticket = ticketService.getById(ticketId);
-        const member = ticket?.assignee;
-
         // Append to work log file in project directory
         appendToWorkLog(job.projectPath, {
             agentName: job.agentName,
-            agentAvatar: member?.avatar || '🤖',
-            ticketTitle: ticket?.title || 'Unknown Task',
+            agentAvatar: agentAvatar || '🤖',
+            ticketTitle: ticketTitle || 'Unknown Task',
             success,
             commitHash,
             output: job.output,
@@ -603,21 +566,6 @@ export function startBackgroundJob(params: StartJobParams): void {
     agentProcess.on('error', (error: Error) => {
         job.status = 'failed';
         job.output += `\n[error] ${error.message}`;
-
-        // Update conversation
-        conversationService.complete(conversationId, {
-            status: 'failed',
-        });
-
-        // Add error message
-        conversationMessageService.create(conversationId, `❌ Process error: ${error.message}`, 'error');
-
-        activityService.log({
-            ticket_id: ticketId,
-            member_id: agentId,
-            action: 'AGENT_WORK_FAILED',
-            details: `${agentName} failed: ${error.message}`,
-        });
 
         setTimeout(() => {
             runningJobs.delete(jobId);
@@ -634,21 +582,6 @@ export function cancelJob(jobId: string): boolean {
     job.process.kill('SIGTERM');
     job.status = 'failed';
     job.output += '\n[cancelled] Job was cancelled by user';
-
-    // Update conversation
-    conversationService.complete(job.conversationId, {
-        status: 'cancelled',
-    });
-
-    // Add cancellation message
-    conversationMessageService.create(job.conversationId, '⏹ Job was cancelled by user', 'system');
-
-    activityService.log({
-        ticket_id: job.ticketId,
-        member_id: job.agentId,
-        action: 'AGENT_WORK_CANCELLED',
-        details: `${job.agentName}'s work was cancelled`,
-    });
 
     runningJobs.delete(jobId);
     return true;

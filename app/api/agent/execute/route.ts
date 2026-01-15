@@ -1,10 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ticketService, memberService, projectService, activityService, conversationService } from '@/lib/db';
 import { startBackgroundJob, AgentProvider } from '@/lib/agent-jobs';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AgentExecuteRequest {
-    ticket_id: string;
+    ticket?: {
+        id: string;
+        title: string;
+        description?: string | null;
+    };
+    agent?: {
+        id: string;
+        name: string;
+        role: string;
+        avatar?: string | null;
+        system_prompt: string;
+        can_generate_images: number;
+        can_log_screenshots: number;
+    };
+    project?: {
+        id?: string;
+        name: string;
+        path: string;
+    };
+    conversation_id?: string;
     feedback?: string;
     provider?: AgentProvider;
 }
@@ -90,31 +108,13 @@ export async function POST(request: NextRequest) {
     try {
         const body: AgentExecuteRequest = await request.json();
 
-        if (!body.ticket_id) {
-            return NextResponse.json({ error: 'ticket_id is required' }, { status: 400 });
+        if (!body.ticket || !body.agent || !body.project) {
+            return NextResponse.json({ error: 'ticket, agent, and project are required' }, { status: 400 });
         }
 
-        // Get ticket
-        const ticket = ticketService.getById(body.ticket_id);
-        if (!ticket) {
-            return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
-        }
-
-        // Get assignee (agent)
-        if (!ticket.assignee_id) {
-            return NextResponse.json({ error: 'Ticket has no assignee' }, { status: 400 });
-        }
-
-        const agent = memberService.getById(ticket.assignee_id);
-        if (!agent) {
-            return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
-        }
-
-        // Get active project
-        const project = projectService.getActive();
-        if (!project) {
-            return NextResponse.json({ error: 'No active project selected. Please select a project first.' }, { status: 400 });
-        }
+        const ticket = body.ticket;
+        const agent = body.agent;
+        const project = body.project;
 
         // Build prompt
         const prompt = buildAgentPrompt(ticket, agent, project, body.feedback);
@@ -124,40 +124,17 @@ export async function POST(request: NextRequest) {
 
         // Generate job ID
         const jobId = uuidv4();
-
-        // Update ticket status to IN_PROGRESS
-        ticketService.update(body.ticket_id, { status: 'IN_PROGRESS' }, agent.id);
-
-        // Create conversation for this execution
-        const conversation = conversationService.create({
-            ticket_id: body.ticket_id,
-            agent_id: agent.id,
-            provider,
-            prompt,
-            feedback: body.feedback,
-        });
-
-        // Log activity
-        const providerLabel = provider === 'opencode'
-            ? 'OpenCode'
-            : provider === 'codex'
-                ? 'Codex CLI'
-                : 'Claude Code';
-
-        activityService.log({
-            ticket_id: body.ticket_id,
-            member_id: agent.id,
-            action: 'AGENT_WORK_STARTED',
-            details: `${agent.name} started working on this task using ${providerLabel}`,
-        });
+        const conversationId = body.conversation_id || uuidv4();
 
         // Start background job (non-blocking)
         startBackgroundJob({
             jobId,
-            conversationId: conversation.id,
-            ticketId: body.ticket_id,
+            conversationId,
+            ticketId: ticket.id,
+            ticketTitle: ticket.title,
             agentId: agent.id,
             agentName: agent.name,
+            agentAvatar: agent.avatar,
             projectPath: project.path,
             prompt,
             provider,
@@ -167,7 +144,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             success: true,
             job_id: jobId,
-            conversation_id: conversation.id,
+            conversation_id: conversationId,
             message: `${agent.name} started working on the task. The job is running in the background.`,
             agent: {
                 id: agent.id,

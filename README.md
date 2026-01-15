@@ -195,7 +195,7 @@ olly-molly/
 
 - **Framework**: Next.js 16
 - **UI**: React 19, Tailwind CSS 4
-- **Database**: SQLite (better-sqlite3)
+- **Database**: TanStack DB (@tanstack/react-db) with IndexedDB persistence
 - **Drag & Drop**: dnd-kit
 - **AI**: Codex CLI / OpenCode / Claude CLI
 

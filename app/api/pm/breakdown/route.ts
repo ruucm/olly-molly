@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ticketService, memberService, projectService } from '@/lib/db';
 import { spawn } from 'child_process';
 
 /**
@@ -169,11 +168,6 @@ Feature Request: ${request}`;
     });
 }
 
-function getAssigneeByRole(role: string): string | null {
-    const member = memberService.getByRole(role);
-    return member?.id || null;
-}
-
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
@@ -185,45 +179,20 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Get active project for CLI execution path
-        const project = projectService.getActive();
-        const projectPath = project?.path || process.cwd();
-
-        const pmMember = memberService.getByRole('PM');
+        const projectPath = typeof body.project_path === 'string' && body.project_path.trim()
+            ? body.project_path.trim()
+            : process.cwd();
 
         // Use CLI to break down the request
         const aiResponse = await breakdownWithCLI(body.request, projectPath);
 
-        const createdTickets = [];
-
-        for (const task of aiResponse.tasks) {
-            const assigneeId = getAssigneeByRole(task.assignee_role);
-
-            const ticket = ticketService.create({
-                title: task.title,
-                description: task.description,
-                priority: task.priority,
-                assignee_id: assigneeId || undefined,
-                project_id: body.project_id,
-                created_by: pmMember?.id,
-            });
-
-            const assignee = assigneeId ? memberService.getById(assigneeId) : null;
-            createdTickets.push({
-                ...ticket,
-                assignee,
-                assigned_role: task.assignee_role,
-            });
-        }
-
         return NextResponse.json({
             success: true,
             original_request: body.request,
-            created_by: pmMember,
-            tickets_created: createdTickets.length,
-            tickets: createdTickets,
+            tickets_created: aiResponse.tasks.length,
+            tasks: aiResponse.tasks,
             ai_summary: aiResponse.summary,
-            message: `PM이 AI를 사용해 "${body.request}" 요청을 분석하여 ${createdTickets.length}개의 태스크를 생성했습니다.`,
+            message: `PM이 AI를 사용해 "${body.request}" 요청을 분석하여 ${aiResponse.tasks.length}개의 태스크를 생성했습니다.`,
         }, { status: 201 });
     } catch (error) {
         console.error('Error in PM breakdown:', error);

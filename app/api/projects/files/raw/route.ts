@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { projectService } from '@/lib/db';
 
 const MIME_TYPES: Record<string, string> = {
     png: 'image/png',
@@ -33,21 +32,20 @@ function resolveProjectPath(projectRoot: string, relativePath?: string | null): 
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const projectId = searchParams.get('projectId');
+        const projectPath = searchParams.get('projectPath');
         const relativePath = searchParams.get('path');
 
         if (!relativePath) {
             return NextResponse.json({ error: 'Path is required' }, { status: 400 });
         }
 
-        const project = projectId ? projectService.getById(projectId) : projectService.getActive();
-        if (!project) {
-            return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+        if (!projectPath) {
+            return NextResponse.json({ error: 'Project path is required' }, { status: 400 });
         }
 
         let targetPath: string;
         try {
-            targetPath = resolveProjectPath(project.path, relativePath);
+            targetPath = resolveProjectPath(projectPath, relativePath);
         } catch {
             return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
         }

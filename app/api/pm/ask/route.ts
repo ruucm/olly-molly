@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { projectService } from '@/lib/db';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -182,9 +181,9 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Get active project
-        const project = projectService.getActive();
-        const projectPath = project?.path || process.cwd();
+        const projectPath = typeof body.project_path === 'string' && body.project_path.trim()
+            ? body.project_path.trim()
+            : process.cwd();
 
         // Use CLI to answer the question
         const answer = await askWithCLI(body.question, projectPath);
@@ -193,10 +192,7 @@ export async function POST(request: NextRequest) {
             success: true,
             question: body.question,
             answer,
-            project: project ? {
-                name: project.name,
-                path: project.path,
-            } : null,
+            project: projectPath ? { path: projectPath } : null,
         });
     } catch (error) {
         console.error('Error in PM ask:', error);

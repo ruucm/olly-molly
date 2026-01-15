@@ -3,7 +3,6 @@ import { spawn, ChildProcess, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { projectService } from '@/lib/db';
 
 const ROOT_RELATIVE_PATH = '.';
 
@@ -298,7 +297,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { action, projectId, projectName, parentPath, path: relativePath } = body;
+        const { action, projectId, projectName, parentPath, projectPath, path: relativePath } = body;
 
         if (action === 'create') {
             // Create new Next.js project
@@ -350,25 +349,15 @@ export async function POST(request: NextRequest) {
                 npxProcess.on('close', async (code) => {
                     if (code === 0) {
                         // Register the project
-                        try {
-                            const project = projectService.create({
+                        resolve(NextResponse.json({
+                            success: true,
+                            project: {
                                 name: projectName,
                                 path: projectPath,
                                 description: 'Next.js project',
-                            });
-                            resolve(NextResponse.json({
-                                success: true,
-                                project,
-                                output,
-                            }));
-                        } catch (dbError) {
-                            resolve(NextResponse.json({
-                                success: true,
-                                path: projectPath,
-                                output,
-                                warning: 'Project created but failed to register',
-                            }));
-                        }
+                            },
+                            output,
+                        }));
                     } else {
                         resolve(NextResponse.json({
                             error: 'Failed to create project',
@@ -390,6 +379,9 @@ export async function POST(request: NextRequest) {
             if (!projectId) {
                 return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
             }
+            if (!projectPath) {
+                return NextResponse.json({ error: 'Project path is required' }, { status: 400 });
+            }
 
             const normalizedPath = normalizeRelativePath(relativePath);
             const serverKey = getServerKey(projectId, normalizedPath);
@@ -405,15 +397,9 @@ export async function POST(request: NextRequest) {
                 });
             }
 
-            // Get project path
-            const project = projectService.getById(projectId);
-            if (!project) {
-                return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-            }
-
             let workingDir: string;
             try {
-                workingDir = resolveProjectPath(project.path, normalizedPath);
+                workingDir = resolveProjectPath(projectPath, normalizedPath);
             } catch {
                 return NextResponse.json({ error: 'Invalid project path' }, { status: 400 });
             }
@@ -483,6 +469,9 @@ export async function POST(request: NextRequest) {
             if (!projectId) {
                 return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
             }
+            if (!projectPath) {
+                return NextResponse.json({ error: 'Project path is required' }, { status: 400 });
+            }
 
             const normalizedPath = normalizeRelativePath(relativePath);
             const serverKey = getServerKey(projectId, normalizedPath);
@@ -499,24 +488,21 @@ export async function POST(request: NextRequest) {
             }
 
             // Check for externally running server and kill it
-            const project = projectService.getById(projectId);
-            if (project) {
-                let targetPath: string;
+            let targetPath: string;
+            try {
+                targetPath = resolveProjectPath(projectPath, normalizedPath);
+            } catch {
+                return NextResponse.json({ error: 'Invalid project path' }, { status: 400 });
+            }
+            const externalServer = detectExternalDevServer(targetPath);
+            if (externalServer.running && externalServer.pid) {
                 try {
-                    targetPath = resolveProjectPath(project.path, normalizedPath);
-                } catch {
-                    return NextResponse.json({ error: 'Invalid project path' }, { status: 400 });
-                }
-                const externalServer = detectExternalDevServer(targetPath);
-                if (externalServer.running && externalServer.pid) {
-                    try {
-                        // Kill the external process
-                        process.kill(externalServer.pid, 'SIGTERM');
-                        return NextResponse.json({ success: true, running: false });
-                    } catch (error) {
-                        console.error('Failed to kill external dev server:', error);
-                        return NextResponse.json({ error: 'Failed to stop external server' }, { status: 500 });
-                    }
+                    // Kill the external process
+                    process.kill(externalServer.pid, 'SIGTERM');
+                    return NextResponse.json({ success: true, running: false });
+                } catch (error) {
+                    console.error('Failed to kill external dev server:', error);
+                    return NextResponse.json({ error: 'Failed to stop external server' }, { status: 500 });
                 }
             }
 
@@ -554,6 +540,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('projectId');
+    const projectPath = searchParams.get('projectPath');
     const relativePath = searchParams.get('path');
 
     if (!projectId) {
@@ -583,11 +570,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Check for externally running dev server
-    const project = projectService.getById(projectId);
-    if (project) {
+    if (projectPath) {
         let targetPath: string;
         try {
-            targetPath = resolveProjectPath(project.path, normalizedPath);
+            targetPath = resolveProjectPath(projectPath, normalizedPath);
         } catch {
             return NextResponse.json({ running: false });
         }
