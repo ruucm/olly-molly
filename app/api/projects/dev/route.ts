@@ -459,6 +459,32 @@ export async function POST(request: NextRequest) {
                 runningDevServers.delete(serverKey);
             });
 
+            // If the process exits immediately, return the captured output so the UI can show the reason.
+            const earlyExit = await new Promise<{ code: number | null } | null>((resolve) => {
+                const timer = setTimeout(() => resolve(null), 1500);
+                devProcess.once('close', (code) => {
+                    clearTimeout(timer);
+                    resolve({ code });
+                });
+                devProcess.once('error', () => {
+                    clearTimeout(timer);
+                    resolve({ code: null });
+                });
+            });
+
+            if (earlyExit) {
+                const output = serverInfo.output.slice(-4000);
+                return NextResponse.json(
+                    {
+                        success: false,
+                        running: false,
+                        error: `Dev server exited immediately (code: ${earlyExit.code ?? 'unknown'})`,
+                        output,
+                    },
+                    { status: 500 }
+                );
+            }
+
             return NextResponse.json({
                 success: true,
                 running: true,

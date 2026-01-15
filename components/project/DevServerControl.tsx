@@ -85,7 +85,7 @@ export function DevServerControl({
                 setPort(data.port);
                 setExternal(false);
             } else {
-                alert(data.error || 'Failed to start dev server');
+                alert([data.error || 'Failed to start dev server', data.output ? `\n\n---\n${data.output}` : ''].join(''));
             }
         } catch (error) {
             alert('Failed to start dev server');
