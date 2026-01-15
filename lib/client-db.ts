@@ -33,6 +33,7 @@ export interface Ticket {
   assignee_id: string | null;
   project_id: string | null;
   created_by: string | null;
+  order_index: number;
   created_at: string;
   updated_at: string;
 }
@@ -254,6 +255,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   assignee_id TEXT REFERENCES members(id),
   project_id TEXT REFERENCES projects(id),
   created_by TEXT,
+  order_index REAL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -372,6 +374,7 @@ async function persistSqliteDump() {
       'assignee_id',
       'project_id',
       'created_by',
+      'order_index',
       'created_at',
       'updated_at',
     ], tickets);
@@ -653,7 +656,8 @@ export function useMembers() {
 
 export function useTickets() {
   const { data } = useLiveQuery(() => ticketsCollection);
-  return (data ?? []) as Ticket[];
+  const tickets = (data ?? []) as Ticket[];
+  return tickets.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
 }
 
 export function useProjects() {
@@ -780,6 +784,14 @@ export const ticketService = {
   getById(id: string): Ticket | undefined {
     return ticketsCollection.get(id);
   },
+  reorder(tickets: { id: string; order_index: number }[]) {
+    tickets.forEach((t) => {
+      ticketsCollection.update(t.id, (draft) => {
+        draft.order_index = t.order_index;
+        draft.updated_at = new Date().toISOString();
+      });
+    });
+  },
   create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_id?: string; project_id?: string; created_by?: string }): Ticket {
     const now = new Date().toISOString();
     const ticket: Ticket = {
@@ -791,6 +803,7 @@ export const ticketService = {
       assignee_id: data.assignee_id || null,
       project_id: data.project_id || null,
       created_by: data.created_by || null,
+      order_index: Date.now(),
       created_at: now,
       updated_at: now,
     };
