@@ -168,6 +168,35 @@ npm run dev
 # Open http://localhost:1234
 ```
 
+### Releasing a New Version
+
+```bash
+scripts/build-prebuilt-macos.sh
+```
+
+```bash
+npm version major|minor|patch
+npm publish
+```
+
+```bash
+git push origin main
+```
+
+```bash
+gh release create v0.2.21 \
+  dist/prebuilt/olly-molly-darwin-arm64.tar.gz \
+```
+
+for windows:
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/build-prebuilt-windows.ps1
+```
+
+```bash
+gh release upload v0.2.21 dist/prebuilt/olly-molly-win32-x64.tar.gz --clobber
+```
+
 ### Project Structure
 
 ```
