@@ -54,7 +54,7 @@ export function TicketCard({ ticket, onClick, isDragging, isRunning, isSelected,
             `}
         >
             <div className="flex items-start gap-3">
-                {/* Selection Checkbox */}
+                {/* Selection Checkbox - only rendered when selection mode is active */}
                 {onSelect && (
                     <div className="flex-shrink-0 pt-0.5">
                         <button
@@ -63,8 +63,8 @@ export function TicketCard({ ticket, onClick, isDragging, isRunning, isSelected,
                                 onSelect(e);
                             }}
                             className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${isSelected
-                                    ? 'bg-indigo-500 border-indigo-500 text-white'
-                                    : 'border-[var(--border-secondary)] hover:border-indigo-400'
+                                ? 'bg-indigo-500 border-indigo-500 text-white'
+                                : 'border-[var(--border-secondary)] hover:border-indigo-400'
                                 }`}
                         >
                             {isSelected && (

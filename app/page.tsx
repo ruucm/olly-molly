@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
-import { KanbanBoard, TicketSidebar } from '@/components/kanban';
+import { KanbanBoard, TicketSidebar, MergeTicketModal } from '@/components/kanban';
 import { TeamPanel } from '@/components/team';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { PMRequestModal } from '@/components/pm';
@@ -10,7 +10,7 @@ import { ProjectSelector, DevServerControl, ProjectArtifactsModal } from '@/comp
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import { Icon } from '@/components/ui';
-import { PanelRightClose, PanelRightOpen, Settings } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Settings, CheckSquare, Square } from 'lucide-react';
 import packageJson from '@/package.json';
 import {
   initClientDb,
@@ -68,6 +68,12 @@ export default function Dashboard() {
   const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
+
+  // Multi-selection state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set());
+  const [showMergeModal, setShowMergeModal] = useState(false);
+
   const appVersion = packageJson.version;
 
   const members = useMembers();
@@ -224,6 +230,58 @@ export default function Dashboard() {
     }
   }, [activeProject]);
 
+  // Selection handlers
+  const handleTicketCheck = useCallback((ticketId: string) => {
+    setSelectedTicketIds(prev => {
+      const next = new Set(prev);
+      if (next.has(ticketId)) {
+        next.delete(ticketId);
+      } else {
+        next.add(ticketId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedTicketIds(new Set());
+  }, []);
+
+  const selectedTickets = useMemo(() => {
+    // We need to map back from BoardTicket (UI) to Ticket for the modal if needed, 
+    // but Modal expects Ticket. Use allTickets or tickets (BoardTicket) depending on Modal prop type.
+    // MergeTicketModal expects Ticket[], and BoardTicket extends UiTicket which is compatible enough or we cast.
+    // Actually tickets is BoardTicket[], checking Ticket type compatibility.
+    // BoardTicket has assignee object, Ticket has assignee object. Should be compatible.
+    return tickets.filter(t => selectedTicketIds.has(t.id)) as Ticket[];
+  }, [tickets, selectedTicketIds]);
+
+  const handleMergeTickets = useCallback((data: {
+    title: string;
+    description: string;
+    priority: string;
+    assignee_id: string | null;
+    deleteOriginals: boolean;
+  }) => {
+    const newTicket = ticketService.create({
+      title: data.title,
+      description: data.description,
+      priority: data.priority as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+      assignee_id: data.assignee_id || undefined,
+      project_id: activeProject?.id,
+    });
+
+    if (data.deleteOriginals) {
+      selectedTicketIds.forEach(id => {
+        ticketService.delete(id);
+      });
+    }
+
+    handleClearSelection();
+    handleRefresh();
+    setShowMergeModal(false);
+  }, [selectedTicketIds, handleClearSelection, handleRefresh, activeProject]);
+
 
 
   const handleCreateTicket = async () => {
@@ -303,6 +361,48 @@ export default function Dashboard() {
             >
               + New
             </Button>
+
+            {/* Selection Mode Toggle */}
+            <div className="flex items-center gap-2 border-l border-[var(--border-primary)] pl-2 ml-1">
+              <button
+                onClick={() => {
+                  setSelectionMode(!selectionMode);
+                  if (selectionMode) handleClearSelection();
+                }}
+                className={`p-1.5 rounded-lg transition-colors ${selectionMode
+                  ? 'bg-indigo-500 text-white'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
+                  }`}
+                title={selectionMode ? '선택 모드 OFF' : '선택 모드'}
+              >
+                <Icon icon={selectionMode ? CheckSquare : Square} />
+              </button>
+
+              {selectionMode && selectedTicketIds.size > 0 && (
+                <>
+                  <span className="text-xs text-indigo-400 font-medium">
+                    {selectedTicketIds.size}
+                  </span>
+                  {selectedTicketIds.size >= 2 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowMergeModal(true)}
+                      className="text-indigo-400 hover:text-indigo-300"
+                    >
+                      Merge
+                    </Button>
+                  )}
+                  <button
+                    onClick={handleClearSelection}
+                    className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    title="Clear selection"
+                  >
+                    ✕
+                  </button>
+                </>
+              )}
+            </div>
             <button
               onClick={() => setImageSettingsModalOpen(true)}
               className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
@@ -343,6 +443,9 @@ export default function Dashboard() {
                   setSelectedTicket(fullTicket as BoardTicket);
                   setTicketSidebarOpen(true);
                 }}
+                selectionMode={selectionMode}
+                selectedTicketIds={selectedTicketIds}
+                onTicketCheck={handleTicketCheck}
               />
             </div>
           }
@@ -411,6 +514,15 @@ export default function Dashboard() {
       <ImageSettingsModal
         isOpen={imageSettingsModalOpen}
         onClose={() => setImageSettingsModalOpen(false)}
+      />
+
+      {/* Merge Ticket Modal */}
+      <MergeTicketModal
+        isOpen={showMergeModal}
+        onClose={() => setShowMergeModal(false)}
+        tickets={selectedTickets}
+        members={members}
+        onMerge={handleMergeTickets}
       />
     </div>
   );
