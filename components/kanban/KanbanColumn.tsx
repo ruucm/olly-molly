@@ -30,9 +30,23 @@ interface KanbanColumnProps {
     icon: string;
     onTicketClick: (ticket: Ticket) => void;
     runningTicketIds?: string[];
+    selectionMode?: boolean;
+    selectedTicketIds?: Set<string>;
+    onTicketSelect?: (ticketId: string, selected: boolean) => void;
 }
 
-export function KanbanColumn({ id, title, tickets, color, icon, onTicketClick, runningTicketIds = [] }: KanbanColumnProps) {
+export function KanbanColumn({
+    id,
+    title,
+    tickets,
+    color,
+    icon,
+    onTicketClick,
+    runningTicketIds = [],
+    selectionMode = false,
+    selectedTicketIds = new Set(),
+    onTicketSelect
+}: KanbanColumnProps) {
     const { setNodeRef, isOver } = useDroppable({ id });
 
     return (
@@ -68,6 +82,9 @@ export function KanbanColumn({ id, title, tickets, color, icon, onTicketClick, r
                             ticket={ticket}
                             onTicketClick={onTicketClick}
                             isRunning={runningTicketIds.includes(ticket.id)}
+                            selectionMode={selectionMode}
+                            isSelected={selectedTicketIds.has(ticket.id)}
+                            onSelect={onTicketSelect}
                         />
                     ))}
                 </SortableContext>

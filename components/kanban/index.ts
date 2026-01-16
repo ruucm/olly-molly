@@ -6,3 +6,4 @@ export { SortableTicket } from './SortableTicket';
 export { TicketSidebar } from './TicketSidebar';
 export { ConversationView } from './ConversationView';
 export { ConversationList } from './ConversationList';
+export { BatchExecuteModal } from './BatchExecuteModal';

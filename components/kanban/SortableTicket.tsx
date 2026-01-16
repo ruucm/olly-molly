@@ -26,9 +26,19 @@ interface SortableTicketProps {
     ticket: Ticket;
     onTicketClick: (ticket: Ticket) => void;
     isRunning?: boolean;
+    selectionMode?: boolean;
+    isSelected?: boolean;
+    onSelect?: (ticketId: string, selected: boolean) => void;
 }
 
-export function SortableTicket({ ticket, onTicketClick, isRunning }: SortableTicketProps) {
+export function SortableTicket({
+    ticket,
+    onTicketClick,
+    isRunning,
+    selectionMode = false,
+    isSelected = false,
+    onSelect
+}: SortableTicketProps) {
     const {
         attributes,
         listeners,
@@ -36,7 +46,7 @@ export function SortableTicket({ ticket, onTicketClick, isRunning }: SortableTic
         transform,
         transition,
         isDragging,
-    } = useSortable({ id: ticket.id });
+    } = useSortable({ id: ticket.id, disabled: selectionMode });
 
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -47,14 +57,16 @@ export function SortableTicket({ ticket, onTicketClick, isRunning }: SortableTic
         <div
             ref={setNodeRef}
             style={style}
-            {...attributes}
-            {...listeners}
+            {...(selectionMode ? {} : { ...attributes, ...listeners })}
         >
             <TicketCard
                 ticket={ticket}
                 onClick={() => !isDragging && onTicketClick(ticket)}
                 isDragging={isDragging}
                 isRunning={isRunning}
+                selectionMode={selectionMode}
+                isSelected={isSelected}
+                onSelect={onSelect}
             />
         </div>
     );

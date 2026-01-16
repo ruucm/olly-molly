@@ -2,6 +2,7 @@
 
 import { Avatar } from '@/components/ui/Avatar';
 import { PriorityBadge } from '@/components/ui/Badge';
+import { Check } from 'lucide-react';
 
 interface Ticket {
     id: string;
@@ -26,9 +27,20 @@ interface TicketCardProps {
     onClick: () => void;
     isDragging?: boolean;
     isRunning?: boolean;
+    selectionMode?: boolean;
+    isSelected?: boolean;
+    onSelect?: (ticketId: string, selected: boolean) => void;
 }
 
-export function TicketCard({ ticket, onClick, isDragging, isRunning }: TicketCardProps) {
+export function TicketCard({
+    ticket,
+    onClick,
+    isDragging,
+    isRunning,
+    selectionMode = false,
+    isSelected = false,
+    onSelect
+}: TicketCardProps) {
     const roleImages: Record<string, string> = {
         PM: '/profiles/pm.png',
         FE_DEV: '/profiles/dev-frontend.png',
@@ -39,18 +51,54 @@ export function TicketCard({ ticket, onClick, isDragging, isRunning }: TicketCar
 
     const profileImage = ticket.assignee ? roleImages[ticket.assignee.role] : undefined;
 
+    const handleClick = (e: React.MouseEvent) => {
+        if (selectionMode && onSelect) {
+            e.stopPropagation();
+            onSelect(ticket.id, !isSelected);
+        } else {
+            onClick();
+        }
+    };
+
+    const handleCheckboxClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (onSelect) {
+            onSelect(ticket.id, !isSelected);
+        }
+    };
+
     return (
         <div
-            onClick={onClick}
+            onClick={handleClick}
             className={`
                 px-4 py-3 border-b border-[var(--border-primary)] cursor-pointer
-                transition-colors duration-150
+                transition-all duration-150
                 hover:bg-[var(--bg-secondary)]
                 ${isDragging ? 'opacity-50 bg-[var(--bg-secondary)]' : ''}
                 ${isRunning ? 'bg-[var(--status-progress)]/30' : ''}
+                ${isSelected ? 'bg-blue-500/10 border-l-2 border-l-blue-500' : ''}
             `}
         >
             <div className="flex items-start gap-3">
+                {/* Selection Checkbox */}
+                {selectionMode && (
+                    <div className="flex-shrink-0 pt-0.5">
+                        <button
+                            onClick={handleCheckboxClick}
+                            className={`
+                                w-5 h-5 rounded border-2 flex items-center justify-center
+                                transition-all duration-150
+                                ${isSelected
+                                    ? 'bg-blue-500 border-blue-500 text-white'
+                                    : 'border-[var(--border-secondary)] hover:border-blue-400'
+                                }
+                            `}
+                        >
+                            {isSelected && <Check className="w-3 h-3" />}
+                        </button>
+                    </div>
+                )}
+
                 {/* Left: Assignee Avatar */}
                 <div className="flex-shrink-0 pt-0.5">
                     {ticket.assignee ? (

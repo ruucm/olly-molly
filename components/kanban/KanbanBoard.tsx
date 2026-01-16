@@ -11,11 +11,11 @@ import {
     useSensors,
     DragStartEvent,
     DragEndEvent,
-    DragOverEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
 import { KanbanColumn } from './KanbanColumn';
 import { TicketCard } from './TicketCard';
+import { CheckSquare, X, Play } from 'lucide-react';
 
 interface Member {
     id: string;
@@ -55,6 +55,7 @@ interface KanbanBoardProps {
     hasActiveProject?: boolean;
     onRefresh?: () => void;
     onTicketSelect?: (ticket: Ticket) => void;
+    onBatchExecute?: (ticketIds: string[]) => void;
 }
 
 const columns = [
@@ -66,9 +67,22 @@ const columns = [
     { id: 'ON_HOLD', title: 'On Hold', color: 'text-amber-500', icon: '⏸️' },
 ];
 
-export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, onTicketDelete, onTicketsReorder, hasActiveProject, onRefresh, onTicketSelect }: KanbanBoardProps) {
+export function KanbanBoard({
+    tickets,
+    members,
+    onTicketUpdate,
+    onTicketCreate,
+    onTicketDelete,
+    onTicketsReorder,
+    hasActiveProject,
+    onRefresh,
+    onTicketSelect,
+    onBatchExecute
+}: KanbanBoardProps) {
     const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
     const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set());
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -109,11 +123,13 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
     }, [runningJobs]);
 
     const handleDragStart = (event: DragStartEvent) => {
+        if (selectionMode) return;
         const ticket = tickets.find(t => t.id === event.active.id);
         if (ticket) setActiveTicket(ticket);
     };
 
     const handleDragEnd = (event: DragEndEvent) => {
+        if (selectionMode) return;
         const { active, over } = event;
         setActiveTicket(null);
 
@@ -152,52 +168,127 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
     };
 
     const handleTicketClick = useCallback((ticket: Ticket) => {
-        onTicketSelect?.(ticket);
-    }, [onTicketSelect]);
+        if (!selectionMode) {
+            onTicketSelect?.(ticket);
+        }
+    }, [onTicketSelect, selectionMode]);
 
-    const handleCreateClick = () => {
-        // For now, creating tickets still uses inline approach or can be added to sidebar
-        // We'll create a minimal ticket and open sidebar
-        onTicketCreate({ title: 'New Ticket', status: 'TODO', priority: 'MEDIUM' });
-    };
+    const handleTicketSelect = useCallback((ticketId: string, selected: boolean) => {
+        setSelectedTicketIds(prev => {
+            const newSet = new Set(prev);
+            if (selected) {
+                newSet.add(ticketId);
+            } else {
+                newSet.delete(ticketId);
+            }
+            return newSet;
+        });
+    }, []);
 
-    const runningCount = runningJobs.filter(j => j.status === 'running').length;
+    const handleToggleSelectionMode = useCallback(() => {
+        if (selectionMode) {
+            // Exiting selection mode - clear selections
+            setSelectedTicketIds(new Set());
+        }
+        setSelectionMode(!selectionMode);
+    }, [selectionMode]);
+
+    const handleClearSelection = useCallback(() => {
+        setSelectedTicketIds(new Set());
+    }, []);
+
+    const handleExecuteSelected = useCallback(() => {
+        if (selectedTicketIds.size === 0) return;
+        onBatchExecute?.(Array.from(selectedTicketIds));
+    }, [selectedTicketIds, onBatchExecute]);
+
+    const selectedCount = selectedTicketIds.size;
 
     return (
-        <div className="flex h-full border-t border-[var(--border-primary)]">
-            {/* Board */}
-            <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-            >
-                <div className="flex gap-4 overflow-x-auto pb-4">
-                    {columns.map((column) => (
-                        <KanbanColumn
-                            key={column.id}
-                            id={column.id}
-                            title={column.title}
-                            color={column.color}
-                            icon={column.icon}
-                            tickets={tickets.filter(t => t.status === column.id)}
-                            onTicketClick={handleTicketClick}
-                            runningTicketIds={runningJobs.filter(j => j.status === 'running').map(j => j.ticketId)}
-                        />
-                    ))}
-                </div>
+        <div className="flex flex-col h-full">
+            {/* Selection Toolbar */}
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border-primary)] bg-[var(--bg-primary)]">
+                <button
+                    onClick={handleToggleSelectionMode}
+                    className={`
+                        flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium
+                        transition-colors duration-150
+                        ${selectionMode
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+                        }
+                    `}
+                >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    {selectionMode ? 'Exit Selection' : 'Select'}
+                </button>
 
-                <DragOverlay>
-                    {activeTicket && (
-                        <TicketCard
-                            ticket={activeTicket}
-                            onClick={() => { }}
-                            isDragging
-                            isRunning={isTicketRunning(activeTicket.id)}
-                        />
-                    )}
-                </DragOverlay>
-            </DndContext>
+                {selectionMode && (
+                    <>
+                        <span className="text-xs text-[var(--text-muted)]">
+                            {selectedCount} selected
+                        </span>
+
+                        {selectedCount > 0 && (
+                            <>
+                                <button
+                                    onClick={handleClearSelection}
+                                    className="flex items-center gap-1 px-2 py-1.5 rounded text-xs text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] transition-colors"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                    Clear
+                                </button>
+                                <button
+                                    onClick={handleExecuteSelected}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+                                >
+                                    <Play className="w-3.5 h-3.5" />
+                                    Execute Selected
+                                </button>
+                            </>
+                        )}
+                    </>
+                )}
+            </div>
+
+            {/* Board */}
+            <div className="flex-1 border-t border-[var(--border-primary)]">
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                >
+                    <div className="flex gap-4 overflow-x-auto pb-4 h-full">
+                        {columns.map((column) => (
+                            <KanbanColumn
+                                key={column.id}
+                                id={column.id}
+                                title={column.title}
+                                color={column.color}
+                                icon={column.icon}
+                                tickets={tickets.filter(t => t.status === column.id)}
+                                onTicketClick={handleTicketClick}
+                                runningTicketIds={runningJobs.filter(j => j.status === 'running').map(j => j.ticketId)}
+                                selectionMode={selectionMode}
+                                selectedTicketIds={selectedTicketIds}
+                                onTicketSelect={handleTicketSelect}
+                            />
+                        ))}
+                    </div>
+
+                    <DragOverlay>
+                        {activeTicket && (
+                            <TicketCard
+                                ticket={activeTicket}
+                                onClick={() => { }}
+                                isDragging
+                                isRunning={isTicketRunning(activeTicket.id)}
+                            />
+                        )}
+                    </DragOverlay>
+                </DndContext>
+            </div>
         </div>
     );
 }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
-import { KanbanBoard, TicketSidebar } from '@/components/kanban';
+import { KanbanBoard, TicketSidebar, BatchExecuteModal } from '@/components/kanban';
 import { TeamPanel } from '@/components/team';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { PMRequestModal } from '@/components/pm';
@@ -19,10 +19,13 @@ import {
   memberService,
   ticketService,
   projectService,
+  conversationService,
+  conversationMessageService,
   type Member,
   type Ticket,
   type Project,
 } from '@/lib/client-db';
+import type { AgentProvider } from '@/lib/agent-jobs';
 
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
 import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
@@ -69,6 +72,10 @@ export default function Dashboard() {
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
   const appVersion = packageJson.version;
+
+  // Batch execute modal state
+  const [batchExecuteModalOpen, setBatchExecuteModalOpen] = useState(false);
+  const [selectedTicketIdsForBatch, setSelectedTicketIdsForBatch] = useState<string[]>([]);
 
   const members = useMembers();
   const allTickets = useTickets();
@@ -224,7 +231,84 @@ export default function Dashboard() {
     }
   }, [activeProject]);
 
+  const handleBatchExecute = useCallback((ticketIds: string[]) => {
+    if (!activeProject) {
+      alert('Please select a project first');
+      return;
+    }
+    setSelectedTicketIdsForBatch(ticketIds);
+    setBatchExecuteModalOpen(true);
+  }, [activeProject]);
 
+  const handleBatchExecuteConfirm = useCallback(async (ticketIds: string[], provider: AgentProvider) => {
+    if (!activeProject) {
+      throw new Error('No active project');
+    }
+
+    // Get tickets with their assignees
+    const ticketsToExecute = ticketIds
+      .map(id => tickets.find(t => t.id === id))
+      .filter((t): t is BoardTicket => !!t && !!t.assignee);
+
+    if (ticketsToExecute.length === 0) {
+      throw new Error('No tickets with assigned agents');
+    }
+
+    // Create conversations for each ticket
+    for (const ticket of ticketsToExecute) {
+      if (ticket.assignee) {
+        const conversation = conversationService.create({
+          ticket_id: ticket.id,
+          agent_id: ticket.assignee.id,
+          provider,
+        });
+        conversationMessageService.create(
+          conversation.id,
+          `🚀 ${ticket.assignee.name} started working on "${ticket.title}"`,
+          'system',
+        );
+      }
+    }
+
+    // Call batch execute API
+    const res = await fetch('/api/agent/execute-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tickets: ticketsToExecute.map(t => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          agent: t.assignee ? {
+            id: t.assignee.id,
+            name: t.assignee.name,
+            role: t.assignee.role,
+            avatar: t.assignee.avatar,
+            system_prompt: t.assignee.system_prompt,
+            can_generate_images: t.assignee.can_generate_images,
+            can_log_screenshots: t.assignee.can_log_screenshots,
+          } : undefined,
+        })),
+        project: {
+          id: activeProject.id,
+          name: activeProject.name,
+          path: activeProject.path,
+        },
+        provider,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to start batch execution');
+    }
+
+    // Update ticket statuses to IN_PROGRESS
+    for (const ticket of ticketsToExecute) {
+      handleTicketUpdate(ticket.id, { status: 'IN_PROGRESS' });
+    }
+  }, [activeProject, tickets, handleTicketUpdate]);
 
   const handleCreateTicket = async () => {
     const newTicket = await handleTicketCreate({
@@ -239,6 +323,13 @@ export default function Dashboard() {
   };
 
   const runningCount = runningJobs.filter(j => j.status === 'running').length;
+
+  // Get selected tickets for batch modal
+  const selectedTicketsForBatch = useMemo(() => {
+    return selectedTicketIdsForBatch
+      .map(id => tickets.find(t => t.id === id))
+      .filter((t): t is BoardTicket => !!t);
+  }, [selectedTicketIdsForBatch, tickets]);
 
   if (loading) {
     return (
@@ -343,6 +434,7 @@ export default function Dashboard() {
                   setSelectedTicket(fullTicket as BoardTicket);
                   setTicketSidebarOpen(true);
                 }}
+                onBatchExecute={handleBatchExecute}
               />
             </div>
           }
@@ -399,7 +491,16 @@ export default function Dashboard() {
         projectId={activeProject?.id}
       />
 
-
+      {/* Batch Execute Modal */}
+      <BatchExecuteModal
+        isOpen={batchExecuteModalOpen}
+        onClose={() => {
+          setBatchExecuteModalOpen(false);
+          setSelectedTicketIdsForBatch([]);
+        }}
+        tickets={selectedTicketsForBatch}
+        onExecute={handleBatchExecuteConfirm}
+      />
 
       {/* CLI Warning Modal */}
       <CLIWarningModal
