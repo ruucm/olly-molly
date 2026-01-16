@@ -15,7 +15,14 @@ interface TaskFromAI {
     assignee_role: 'FE_DEV' | 'BACKEND_DEV' | 'QA' | 'DEVOPS' | 'BUG_HUNTER';
 }
 
-const SYSTEM_PROMPT = `You are a PM (Project Manager) AI agent for a software development team.
+interface ExistingTicket {
+    title: string;
+    status: string;
+    priority: string;
+}
+
+function buildSystemPrompt(existingTickets?: ExistingTicket[]): string {
+    let prompt = `You are a PM (Project Manager) AI agent for a software development team.
 
 Your team consists of:
 - FE_DEV (Frontend Developer): Handles UI/UX, React, Next.js, CSS, components, user interfaces
@@ -36,8 +43,16 @@ IMPORTANT RULES:
 - Only create BACKEND_DEV tasks if APIs, data storage, auth, or server logic are truly needed
 - Only add QA/DEVOPS tasks when they are clearly necessary
 - Use Korean for titles and descriptions
+- AVOID creating duplicate tasks that already exist on the board`;
 
-CRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The format must be exactly:
+    if (existingTickets && existingTickets.length > 0) {
+        prompt += `\n\n## EXISTING TICKETS ON THE BOARD\nThe following tickets already exist. Avoid creating duplicate or overlapping tasks:\n`;
+        existingTickets.forEach(t => {
+            prompt += `- [${t.status}] ${t.title} (${t.priority})\n`;
+        });
+    }
+
+    prompt += `\n\nCRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The format must be exactly:
 {
   "tasks": [
     {
@@ -49,6 +64,9 @@ CRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The for
   ],
   "summary": "Brief summary of the breakdown in Korean"
 }`;
+
+    return prompt;
+}
 
 // Detect available CLI tool
 type SupportedCLI = 'claude' | 'opencode' | 'codex';
@@ -98,11 +116,10 @@ function classifyCliError(raw: string): { status: number; publicMessage: string 
     return { status: 500, publicMessage: 'Failed to run CLI.' };
 }
 
-async function breakdownWithCLI(cli: SupportedCLI, request: string, projectPath: string): Promise<{ tasks: TaskFromAI[]; summary: string }> {
+async function breakdownWithCLI(cli: SupportedCLI, request: string, projectPath: string, existingTickets?: ExistingTicket[]): Promise<{ tasks: TaskFromAI[]; summary: string }> {
 
-    const fullPrompt = `${SYSTEM_PROMPT}
-
-Feature Request: ${request}`;
+    const systemPrompt = buildSystemPrompt(existingTickets);
+    const fullPrompt = `${systemPrompt}\n\nFeature Request: ${request}`;
 
     return new Promise((resolve, reject) => {
         let output = '';
@@ -228,7 +245,8 @@ export async function POST(request: NextRequest) {
         }
 
         // Run ONLY the requested provider (no fallback)
-        const aiResponse = await breakdownWithCLI(requestedProvider, body.request, projectPath);
+        const existingTickets = Array.isArray(body.existing_tickets) ? body.existing_tickets : [];
+        const aiResponse = await breakdownWithCLI(requestedProvider, body.request, projectPath, existingTickets);
 
         return NextResponse.json({
             success: true,

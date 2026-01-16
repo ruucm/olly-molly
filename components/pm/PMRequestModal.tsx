@@ -68,6 +68,13 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         setError(null);
 
         try {
+            // 현재 프로젝트의 기존 티켓 가져오기
+            const existingTickets = ticketService.getAll(undefined, projectId).map(t => ({
+                title: t.title,
+                status: t.status,
+                priority: t.priority,
+            }));
+
             const res = await fetch('/api/pm/breakdown', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -76,6 +83,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                     project_id: projectId,
                     project_path: project?.path,
                     provider,
+                    existing_tickets: existingTickets,
                 }),
             });
 
