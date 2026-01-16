@@ -181,11 +181,11 @@ ${projectContext}
             reject(new Error(`Failed to start CLI: ${error.message}`));
         });
 
-        // Timeout after 2 minutes
+        // Timeout after 5 minutes
         setTimeout(() => {
             proc.kill();
             reject(new Error('CLI timeout - process took too long'));
-        }, 120000);
+        }, 300000);
     });
 }
 
