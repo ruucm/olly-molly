@@ -426,9 +426,18 @@ export async function POST(request: NextRequest) {
             const port = await findAvailablePort(3001);
 
             // Start npm run dev via the user's shell so PATH/NVM matches terminal runs.
+            // Use interactive login shells where possible to load nvm/asdf configs
+            // (many setups only initialize in .zshrc/.bashrc).
+            const userShell = process.env.SHELL || '/bin/zsh';
+            const shellName = path.basename(userShell);
+            const shellArgs = (() => {
+                if (process.platform === 'win32') return ['/c'];
+                if (shellName === 'zsh' || shellName === 'bash') return ['-lic'];
+                return ['-lc'];
+            })();
             const npmCommand = process.platform === 'win32'
-                ? { cmd: 'cmd.exe', args: ['/c', `npm run dev -- --port ${port}`] }
-                : { cmd: process.env.SHELL || '/bin/zsh', args: ['-lc', `npm run dev -- --port ${port}`] };
+                ? { cmd: 'cmd.exe', args: [...shellArgs, `npm run dev -- --port ${port}`] }
+                : { cmd: userShell, args: [...shellArgs, `npm run dev -- --port ${port}`] };
 
             const devProcess = spawn(npmCommand.cmd, npmCommand.args, {
                 cwd: workingDir,
