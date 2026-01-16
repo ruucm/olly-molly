@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Image from 'next/image';
 import { KanbanBoard, TicketSidebar, MergeTicketModal } from '@/components/kanban';
 import { TeamPanel } from '@/components/team';
@@ -19,10 +19,13 @@ import {
   memberService,
   ticketService,
   projectService,
+  conversationService,
+  conversationMessageService,
   type Member,
   type Ticket,
   type Project,
 } from '@/lib/client-db';
+import type { AgentProvider } from '@/lib/agent-jobs';
 
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
 import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
@@ -94,6 +97,104 @@ export default function Dashboard() {
       assignees: (ticket.assignee_ids || []).map(id => membersById.get(id)).filter(Boolean) as BoardMember[],
     }));
   }, [allTickets, activeProjectId, membersById]);
+
+  const queueStartRef = useRef(false);
+
+  const getStoredProvider = useCallback((): AgentProvider => {
+    if (typeof window === 'undefined') return 'opencode';
+    const savedProvider = window.localStorage.getItem('agentProvider') as AgentProvider | null;
+    if (savedProvider === 'claude' || savedProvider === 'opencode' || savedProvider === 'codex') {
+      return savedProvider;
+    }
+    return 'opencode';
+  }, []);
+
+  const startQueuedTicket = useCallback(async (ticket: BoardTicket) => {
+    if (queueStartRef.current) return;
+    const agentId = ticket.assignee_ids?.[0];
+    if (!agentId) return;
+    const agent = membersById.get(agentId);
+    if (!agent) return;
+    const project = activeProject ?? projectService.getActive();
+    if (!project) return;
+
+    queueStartRef.current = true;
+
+    try {
+      const persistedTicket = ticketService.getById(ticket.id);
+      if (!persistedTicket) {
+        throw new Error('Failed to load ticket from database');
+      }
+
+      const provider = getStoredProvider();
+      const conversation = conversationService.create({
+        ticket_id: ticket.id,
+        agent_id: agent.id,
+        provider,
+      });
+      conversationMessageService.create(
+        conversation.id,
+        `🚀 ${agent.name} started working on "${persistedTicket.title}"`,
+        'system',
+      );
+
+      const res = await fetch('/api/agent/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticket: {
+            id: persistedTicket.id,
+            title: persistedTicket.title,
+            description: persistedTicket.description,
+          },
+          agent: {
+            id: agent.id,
+            name: agent.name,
+            role: agent.role,
+            avatar: agent.avatar,
+            system_prompt: agent.system_prompt,
+            can_generate_images: agent.can_generate_images,
+            can_log_screenshots: agent.can_log_screenshots,
+          },
+          project: {
+            id: project.id,
+            name: project.name,
+            path: project.path,
+          },
+          conversation_id: conversation.id,
+          provider,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        ticketService.update(ticket.id, { status: 'IN_PROGRESS' });
+      } else {
+        conversationService.complete(conversation.id, { status: 'failed' });
+        conversationMessageService.create(conversation.id, '❌ Failed to start agent', 'error');
+        console.error('Failed to start queued ticket:', data.error || data);
+        queueStartRef.current = false;
+      }
+    } catch (error) {
+      console.error('Failed to start queued ticket:', error);
+      queueStartRef.current = false;
+    }
+  }, [activeProject, getStoredProvider, membersById]);
+
+  useEffect(() => {
+    const hasRunningJob = runningJobs.some(job => job.status === 'running');
+    const hasInProgress = tickets.some(ticket => ticket.status === 'IN_PROGRESS');
+    if (hasRunningJob || hasInProgress) {
+      queueStartRef.current = false;
+      return;
+    }
+
+    if (queueStartRef.current) return;
+
+    const nextQueued = tickets.find(ticket => ticket.status === 'QUEUE');
+    if (!nextQueued) return;
+    void startQueuedTicket(nextQueued);
+  }, [runningJobs, tickets, startQueuedTicket]);
 
 
 

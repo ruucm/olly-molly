@@ -35,6 +35,7 @@ export function Badge({ children, variant = 'default', size = 'sm' }: BadgeProps
 export function StatusBadge({ status }: { status: string }) {
     const statusConfig: Record<string, { label: string; variant: BadgeProps['variant'] }> = {
         TODO: { label: 'Todo', variant: 'default' },
+        QUEUE: { label: 'Queue', variant: 'warning' },
         IN_PROGRESS: { label: 'Progress', variant: 'info' },
         IN_REVIEW: { label: 'Review', variant: 'purple' },
         COMPLETE: { label: 'Done', variant: 'success' },

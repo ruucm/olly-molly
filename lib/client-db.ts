@@ -28,7 +28,7 @@ export interface Ticket {
   id: string;
   title: string;
   description: string | null;
-  status: 'TODO' | 'IN_PROGRESS' | 'IN_REVIEW' | 'NEED_FIX' | 'COMPLETE' | 'ON_HOLD';
+  status: 'TODO' | 'QUEUE' | 'IN_PROGRESS' | 'IN_REVIEW' | 'NEED_FIX' | 'COMPLETE' | 'ON_HOLD';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   assignee_ids: string[];  // Multi-assignee support
   project_id: string | null;
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
-  status TEXT DEFAULT 'TODO' CHECK(status IN ('TODO', 'IN_PROGRESS', 'IN_REVIEW', 'NEED_FIX', 'COMPLETE', 'ON_HOLD')),
+  status TEXT DEFAULT 'TODO' CHECK(status IN ('TODO', 'QUEUE', 'IN_PROGRESS', 'IN_REVIEW', 'NEED_FIX', 'COMPLETE', 'ON_HOLD')),
   priority TEXT DEFAULT 'MEDIUM' CHECK(priority IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
   assignee_id TEXT REFERENCES members(id),
   project_id TEXT REFERENCES projects(id),

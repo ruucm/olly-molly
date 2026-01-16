@@ -60,6 +60,7 @@ interface TicketSidebarProps {
 
 const statusOptions = [
     { value: 'TODO', label: 'To Do' },
+    { value: 'QUEUE', label: 'Queue' },
     { value: 'IN_PROGRESS', label: 'In Progress' },
     { value: 'IN_REVIEW', label: 'In Review' },
     { value: 'NEED_FIX', label: 'Need Fix' },

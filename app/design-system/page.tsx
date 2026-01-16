@@ -126,6 +126,7 @@ export default function DesignSystemPage() {
                         </div>
                         <div className="flex flex-wrap gap-3 mb-4">
                             <StatusBadge status="TODO" />
+                            <StatusBadge status="QUEUE" />
                             <StatusBadge status="IN_PROGRESS" />
                             <StatusBadge status="IN_REVIEW" />
                             <StatusBadge status="COMPLETE" />

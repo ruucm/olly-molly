@@ -63,6 +63,7 @@ interface KanbanBoardProps {
 
 const columns = [
     { id: 'TODO', title: 'To Do', color: 'text-[var(--text-secondary)]', icon: '📋' },
+    { id: 'QUEUE', title: 'Queue', color: 'text-amber-400', icon: '⏳' },
     { id: 'IN_PROGRESS', title: 'In Progress', color: 'text-blue-500', icon: '🔄' },
     { id: 'IN_REVIEW', title: 'In Review', color: 'text-purple-500', icon: '👀' },
     { id: 'NEED_FIX', title: 'Need Fix', color: 'text-orange-500', icon: '🛠️' },
