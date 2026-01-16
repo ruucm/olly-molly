@@ -26,9 +26,11 @@ interface TicketCardProps {
     onClick: () => void;
     isDragging?: boolean;
     isRunning?: boolean;
+    isSelected?: boolean;
+    onSelect?: (e: React.MouseEvent) => void;
 }
 
-export function TicketCard({ ticket, onClick, isDragging, isRunning }: TicketCardProps) {
+export function TicketCard({ ticket, onClick, isDragging, isRunning, isSelected, onSelect }: TicketCardProps) {
     const roleImages: Record<string, string> = {
         PM: '/profiles/pm.png',
         FE_DEV: '/profiles/dev-frontend.png',
@@ -48,9 +50,31 @@ export function TicketCard({ ticket, onClick, isDragging, isRunning }: TicketCar
                 hover:bg-[var(--bg-secondary)]
                 ${isDragging ? 'opacity-50 bg-[var(--bg-secondary)]' : ''}
                 ${isRunning ? 'bg-[var(--status-progress)]/30' : ''}
+                ${isSelected ? 'bg-indigo-500/10 border-l-2 border-l-indigo-500' : ''}
             `}
         >
             <div className="flex items-start gap-3">
+                {/* Selection Checkbox */}
+                {onSelect && (
+                    <div className="flex-shrink-0 pt-0.5">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onSelect(e);
+                            }}
+                            className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${isSelected
+                                    ? 'bg-indigo-500 border-indigo-500 text-white'
+                                    : 'border-[var(--border-secondary)] hover:border-indigo-400'
+                                }`}
+                        >
+                            {isSelected && (
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                            )}
+                        </button>
+                    </div>
+                )}
                 {/* Left: Assignee Avatar */}
                 <div className="flex-shrink-0 pt-0.5">
                     {ticket.assignee ? (

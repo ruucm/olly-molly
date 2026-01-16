@@ -26,9 +26,11 @@ interface SortableTicketProps {
     ticket: Ticket;
     onTicketClick: (ticket: Ticket) => void;
     isRunning?: boolean;
+    isSelected?: boolean;
+    onSelect?: (e: React.MouseEvent) => void;
 }
 
-export function SortableTicket({ ticket, onTicketClick, isRunning }: SortableTicketProps) {
+export function SortableTicket({ ticket, onTicketClick, isRunning, isSelected, onSelect }: SortableTicketProps) {
     const {
         attributes,
         listeners,
@@ -55,6 +57,8 @@ export function SortableTicket({ ticket, onTicketClick, isRunning }: SortableTic
                 onClick={() => !isDragging && onTicketClick(ticket)}
                 isDragging={isDragging}
                 isRunning={isRunning}
+                isSelected={isSelected}
+                onSelect={onSelect}
             />
         </div>
     );

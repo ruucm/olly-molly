@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
     DndContext,
     DragOverlay,
@@ -16,6 +16,8 @@ import {
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
 import { KanbanColumn } from './KanbanColumn';
 import { TicketCard } from './TicketCard';
+import { MergeTicketModal } from './MergeTicketModal';
+import { ticketService, memberService } from '@/lib/client-db';
 
 interface Member {
     id: string;
@@ -69,6 +71,10 @@ const columns = [
 export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, onTicketDelete, onTicketsReorder, hasActiveProject, onRefresh, onTicketSelect }: KanbanBoardProps) {
     const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
     const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
+
+    // Multi-selection state
+    const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set());
+    const [showMergeModal, setShowMergeModal] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -161,43 +167,131 @@ export function KanbanBoard({ tickets, members, onTicketUpdate, onTicketCreate, 
         onTicketCreate({ title: 'New Ticket', status: 'TODO', priority: 'MEDIUM' });
     };
 
+    // Selection handlers
+    const handleTicketSelect = useCallback((ticketId: string) => {
+        setSelectedTicketIds(prev => {
+            const next = new Set(prev);
+            if (next.has(ticketId)) {
+                next.delete(ticketId);
+            } else {
+                next.add(ticketId);
+            }
+            return next;
+        });
+    }, []);
+
+    const clearSelection = useCallback(() => {
+        setSelectedTicketIds(new Set());
+    }, []);
+
+    const selectedTickets = useMemo(() => {
+        return tickets.filter(t => selectedTicketIds.has(t.id));
+    }, [tickets, selectedTicketIds]);
+
+    const handleMergeTickets = useCallback((data: {
+        title: string;
+        description: string;
+        priority: string;
+        assignee_id: string | null;
+        deleteOriginals: boolean;
+    }) => {
+        // Create merged ticket
+        const activeProject = require('@/lib/client-db').projectService.getActive();
+        const newTicket = ticketService.create({
+            title: data.title,
+            description: data.description,
+            priority: data.priority as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+            assignee_id: data.assignee_id || undefined,
+            project_id: activeProject?.id,
+        });
+
+        // Delete originals if requested
+        if (data.deleteOriginals) {
+            selectedTicketIds.forEach(id => {
+                ticketService.delete(id);
+            });
+        }
+
+        // Clear selection and refresh
+        clearSelection();
+        onRefresh?.();
+        setShowMergeModal(false);
+    }, [selectedTicketIds, clearSelection, onRefresh]);
+
     const runningCount = runningJobs.filter(j => j.status === 'running').length;
 
     return (
-        <div className="flex h-full border-t border-[var(--border-primary)]">
-            {/* Board */}
-            <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-            >
-                <div className="flex gap-4 overflow-x-auto pb-4">
-                    {columns.map((column) => (
-                        <KanbanColumn
-                            key={column.id}
-                            id={column.id}
-                            title={column.title}
-                            color={column.color}
-                            icon={column.icon}
-                            tickets={tickets.filter(t => t.status === column.id)}
-                            onTicketClick={handleTicketClick}
-                            runningTicketIds={runningJobs.filter(j => j.status === 'running').map(j => j.ticketId)}
-                        />
-                    ))}
-                </div>
-
-                <DragOverlay>
-                    {activeTicket && (
-                        <TicketCard
-                            ticket={activeTicket}
-                            onClick={() => { }}
-                            isDragging
-                            isRunning={isTicketRunning(activeTicket.id)}
-                        />
+        <div className="flex flex-col h-full">
+            {/* Selection Toolbar */}
+            {selectedTicketIds.size > 0 && (
+                <div className="px-4 py-2 bg-indigo-500/10 border-b border-indigo-500/20 flex items-center gap-3">
+                    <span className="text-sm text-indigo-400">
+                        {selectedTicketIds.size}개 티켓 선택됨
+                    </span>
+                    <div className="flex-1" />
+                    {selectedTicketIds.size >= 2 && (
+                        <button
+                            onClick={() => setShowMergeModal(true)}
+                            className="px-3 py-1.5 text-sm font-medium bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
+                        >
+                            🔀 Merge Selected
+                        </button>
                     )}
-                </DragOverlay>
-            </DndContext>
+                    <button
+                        onClick={clearSelection}
+                        className="px-3 py-1.5 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                    >
+                        ✕ Clear
+                    </button>
+                </div>
+            )}
+
+            {/* Board */}
+            <div className="flex-1 flex border-t border-[var(--border-primary)]">
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                >
+                    <div className="flex gap-4 overflow-x-auto pb-4">
+                        {columns.map((column) => (
+                            <KanbanColumn
+                                key={column.id}
+                                id={column.id}
+                                title={column.title}
+                                color={column.color}
+                                icon={column.icon}
+                                tickets={tickets.filter(t => t.status === column.id)}
+                                onTicketClick={handleTicketClick}
+                                runningTicketIds={runningJobs.filter(j => j.status === 'running').map(j => j.ticketId)}
+                                selectedTicketIds={selectedTicketIds}
+                                onTicketSelect={handleTicketSelect}
+                            />
+                        ))}
+                    </div>
+
+                    <DragOverlay>
+                        {activeTicket && (
+                            <TicketCard
+                                ticket={activeTicket}
+                                onClick={() => { }}
+                                isDragging
+                                isRunning={isTicketRunning(activeTicket.id)}
+                            />
+                        )}
+                    </DragOverlay>
+                </DndContext>
+            </div>
+
+            {/* Merge Modal */}
+            <MergeTicketModal
+                isOpen={showMergeModal}
+                onClose={() => setShowMergeModal(false)}
+                tickets={selectedTickets}
+                members={members}
+                onMerge={handleMergeTickets}
+            />
         </div>
     );
 }
