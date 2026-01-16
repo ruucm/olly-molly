@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
+import { MultiSelect } from '@/components/ui/MultiSelect';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
 import {
@@ -118,7 +119,7 @@ export function TicketSidebar({
     const [description, setDescription] = useState('');
     const [status, setStatus] = useState('TODO');
     const [priority, setPriority] = useState('MEDIUM');
-    const [assigneeId, setAssigneeId] = useState('');
+    const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
     const [feedback, setFeedback] = useState('');
     const [provider, setProvider] = useState<AgentProvider>('opencode');
     const [executing, setExecuting] = useState(false);
@@ -153,8 +154,7 @@ export function TicketSidebar({
             setDescription(ticket.description || '');
             setStatus(ticket.status);
             setPriority(ticket.priority);
-            // For now, use first assignee for the single select UI
-            setAssigneeId(ticket.assignee_ids?.[0] || '');
+            setSelectedAssigneeIds(ticket.assignee_ids || []);
             setShowTicketDetails(true);
             // Reset executing state and conversation selection when switching tickets
             setExecuting(false);
@@ -324,7 +324,7 @@ export function TicketSidebar({
             description: description || null,
             status,
             priority,
-            assignee_ids: assigneeId ? [assigneeId] : [],
+            assignee_ids: selectedAssigneeIds,
         });
     };
 
@@ -341,14 +341,14 @@ export function TicketSidebar({
     };
 
     const handleExecuteAgent = async () => {
-        if (!ticket || !assigneeId) return;
+        if (!ticket || selectedAssigneeIds.length === 0) return;
 
         setExecuting(true);
 
         try {
             await persistTicketDetails();
 
-            const agent = members.find((member) => member.id === assigneeId);
+            const agent = members.find((member) => member.id === selectedAssigneeIds[0]);
             const project = projectService.getActive();
 
             if (!agent || !project) {
@@ -445,12 +445,17 @@ export function TicketSidebar({
         }
     };
 
-    const memberOptions = [
-        { value: '', label: 'Unassigned' },
-        ...members
-            .filter(m => m.role !== 'PM') // PM은 담당자로 선택 불가
-            .map(m => ({ value: m.id, label: `${m.avatar} ${m.name}` }))
-    ];
+    // Helper for toggling assignees
+    const toggleAssignee = (memberId: string) => {
+        setSelectedAssigneeIds(prev =>
+            prev.includes(memberId)
+                ? prev.filter(id => id !== memberId)
+                : [...prev, memberId]
+        );
+    };
+
+    // Available members for assignee selection (exclude PM)
+    const availableMembers = members.filter(m => m.role !== 'PM');
 
     const selectedConversation = conversationsWithAgent.find(c => c.id === selectedConversationId) || null;
     const isConversationRunning = selectedConversation?.status === 'running';
@@ -522,14 +527,21 @@ export function TicketSidebar({
                             options={priorityOptions}
                             className="text-sm"
                         />
-                        <Select
-                            label="Assignee"
-                            value={assigneeId}
-                            onChange={setAssigneeId}
-                            options={memberOptions}
-                            className="text-sm"
-                        />
                     </div>
+
+                    {/* Multi-Assignee Selection */}
+                    <MultiSelect
+                        label="Assignees"
+                        values={selectedAssigneeIds}
+                        onChange={setSelectedAssigneeIds}
+                        options={availableMembers.map(m => ({
+                            value: m.id,
+                            label: m.name,
+                            avatar: m.avatar || undefined
+                        }))}
+                        placeholder="Select assignees..."
+                        className="text-sm"
+                    />
                     <div className="flex gap-2">
                         <Button onClick={handleSave} variant="primary" size="sm">Save</Button>
                         {onTicketDelete && (
@@ -541,7 +553,7 @@ export function TicketSidebar({
             )}
 
             {/* AI Agent Execution Section */}
-            {assigneeId && (
+            {selectedAssigneeIds.length > 0 && (
                 <div className="flex-1 flex flex-col min-h-0">
                     {/* Minimal Agent Control Bar */}
                     <div
@@ -694,11 +706,11 @@ export function TicketSidebar({
                 </div>
             )}
 
-            {!assigneeId && (
+            {selectedAssigneeIds.length === 0 && (
                 <div className="flex-1 flex items-center justify-center text-muted">
                     <div className="text-center">
                         <p className="text-lg mb-2">👤</p>
-                        <p>Assign an agent to this ticket to execute tasks</p>
+                        <p>Assign agent(s) to this ticket to execute tasks</p>
                     </div>
                 </div>
             )}

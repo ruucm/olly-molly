@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
+import { MultiSelect } from '@/components/ui/MultiSelect';
 import { Badge } from '@/components/ui/Badge';
 import { ActivityLog } from '@/components/activity/ActivityLog';
 import { projectService, ticketService } from '@/lib/client-db';
@@ -96,7 +97,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
     const [description, setDescription] = useState(ticket?.description || '');
     const [status, setStatus] = useState(ticket?.status || 'TODO');
     const [priority, setPriority] = useState(ticket?.priority || 'MEDIUM');
-    const [assigneeId, setAssigneeId] = useState(ticket?.assignee_ids?.[0] || '');
+    const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>(ticket?.assignee_ids || []);
     const [showLogs, setShowLogs] = useState(false);
     const [showWorkLogs, setShowWorkLogs] = useState(false);
     const [workLogs, setWorkLogs] = useState<WorkLog[]>([]);
@@ -130,7 +131,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             setDescription(ticket.description || '');
             setStatus(ticket.status);
             setPriority(ticket.priority);
-            setAssigneeId(ticket.assignee_ids?.[0] || '');
+            setSelectedAssigneeIds(ticket.assignee_ids || []);
         }
     }, [ticket]);
 
@@ -196,12 +197,12 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             description: description || null,
             status,
             priority,
-            assignee_ids: assigneeId ? [assigneeId] : [],
+            assignee_ids: selectedAssigneeIds,
         });
     };
 
     const handleExecuteAgent = async () => {
-        if (!ticket || ticket.assignee_ids.length === 0) return;
+        if (!ticket || selectedAssigneeIds.length === 0) return;
 
         setExecuting(true);
 
@@ -211,10 +212,10 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                 description: description || null,
                 status,
                 priority,
-                assignee_ids: assigneeId ? [assigneeId] : [],
+                assignee_ids: selectedAssigneeIds,
             }));
 
-            const agent = members.find((member) => member.id === ticket.assignee_ids[0]);
+            const agent = members.find((member) => member.id === selectedAssigneeIds[0]);
             const project = projectService.getActive();
             if (!agent || !project) {
                 throw new Error('Missing agent or active project for execution');
@@ -278,12 +279,17 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
         }
     };
 
-    const memberOptions = [
-        { value: '', label: 'Unassigned' },
-        ...members
-            .filter(m => m.role !== 'PM') // PM은 담당자로 선택 불가
-            .map(m => ({ value: m.id, label: `${m.avatar} ${m.name}` }))
-    ];
+    // Helper for toggling assignees
+    const toggleAssignee = (memberId: string) => {
+        setSelectedAssigneeIds(prev =>
+            prev.includes(memberId)
+                ? prev.filter(id => id !== memberId)
+                : [...prev, memberId]
+        );
+    };
+
+    // Available members for assignee selection (exclude PM)
+    const availableMembers = members.filter(m => m.role !== 'PM');
 
     const formatDuration = (ms: number) => {
         if (ms < 1000) return `${ms}ms`;
@@ -341,15 +347,20 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                     />
                 </div>
 
-                <Select
-                    label="Assignee"
-                    value={assigneeId}
-                    onChange={setAssigneeId}
-                    options={memberOptions}
+                {/* Multi-Assignee Selection */}
+                <MultiSelect
+                    label="Assignees"
+                    values={selectedAssigneeIds}
+                    onChange={setSelectedAssigneeIds}
+                    options={availableMembers.map(m => ({
+                        value: m.id,
+                        label: m.name,
+                        avatar: m.avatar || undefined
+                    }))}
+                    placeholder="Select assignees..."
                 />
 
-                {/* Agent Execution Section */}
-                {isEditing && ticket && ticket.assignee_ids.length > 0 && (
+                {isEditing && ticket && selectedAssigneeIds.length > 0 && (
                     <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg space-y-3">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">

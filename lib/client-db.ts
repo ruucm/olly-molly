@@ -857,7 +857,7 @@ export const ticketService = {
 
     if (data.assignee_ids !== undefined) {
       const newNames = data.assignee_ids.map(aid => memberService.getById(aid)?.name || '').filter(Boolean).join(', ');
-      const oldNames = current.assignee_ids.map(aid => memberService.getById(aid)?.name || '').filter(Boolean).join(', ');
+      const oldNames = (current.assignee_ids || []).map(aid => memberService.getById(aid)?.name || '').filter(Boolean).join(', ');
       if (newNames !== oldNames) {
         activityService.log({
           ticket_id: id,
