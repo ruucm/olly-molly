@@ -48,7 +48,7 @@ export function MergeTicketModal({ isOpen, onClose, tickets, members, onMerge }:
     // Calculate default values based on selected tickets
     const defaultTitle = useMemo(() => {
         if (tickets.length === 0) return '';
-        return `[Merged] ${tickets.map(t => t.title).join(' + ')}`;
+        return `${tickets.map(t => t.title).join(' + ')}`;
     }, [tickets]);
 
     const defaultPriority = useMemo(() => {
@@ -175,8 +175,8 @@ export function MergeTicketModal({ isOpen, onClose, tickets, members, onMerge }:
                                 type="button"
                                 onClick={() => toggleAssignee(member.id)}
                                 className={`px-3 py-1.5 text-xs rounded-full border transition-colors flex items-center gap-1.5 ${selectedAssigneeIds.includes(member.id)
-                                        ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400'
-                                        : 'bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-indigo-400'
+                                    ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400'
+                                    : 'bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-indigo-400'
                                     }`}
                             >
                                 <span>{member.avatar}</span>
