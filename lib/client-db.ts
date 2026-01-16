@@ -30,7 +30,7 @@ export interface Ticket {
   description: string | null;
   status: 'TODO' | 'IN_PROGRESS' | 'IN_REVIEW' | 'NEED_FIX' | 'COMPLETE' | 'ON_HOLD';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  assignee_id: string | null;
+  assignee_ids: string[];  // Multi-assignee support
   project_id: string | null;
   created_by: string | null;
   order_index: number;
@@ -371,13 +371,16 @@ async function persistSqliteDump() {
       'description',
       'status',
       'priority',
-      'assignee_id',
+      'assignee_ids',
       'project_id',
       'created_by',
       'order_index',
       'created_at',
       'updated_at',
-    ], tickets);
+    ], tickets.map(t => ({
+      ...t,
+      assignee_ids: JSON.stringify(t.assignee_ids || []),
+    } as any)));
 
     insertRows<ActivityLog>('activity_logs', [
       'id',
@@ -792,7 +795,7 @@ export const ticketService = {
       });
     });
   },
-  create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_id?: string; project_id?: string; created_by?: string }): Ticket {
+  create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_ids?: string[]; project_id?: string; created_by?: string }): Ticket {
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: uuidv4(),
@@ -800,7 +803,7 @@ export const ticketService = {
       description: data.description || null,
       status: 'TODO',
       priority: data.priority || 'MEDIUM',
-      assignee_id: data.assignee_id || null,
+      assignee_ids: data.assignee_ids || [],
       project_id: data.project_id || null,
       created_by: data.created_by || null,
       order_index: Date.now(),
@@ -817,7 +820,7 @@ export const ticketService = {
     });
     return ticket;
   },
-  update(id: string, data: Partial<Pick<Ticket, 'title' | 'description' | 'status' | 'priority' | 'assignee_id'>>, updatedBy?: string): Ticket | undefined {
+  update(id: string, data: Partial<Pick<Ticket, 'title' | 'description' | 'status' | 'priority' | 'assignee_ids'>>, updatedBy?: string): Ticket | undefined {
     const current = this.getById(id);
     if (!current) return undefined;
 
@@ -826,7 +829,7 @@ export const ticketService = {
       if (data.description !== undefined) draft.description = data.description;
       if (data.status !== undefined) draft.status = data.status;
       if (data.priority !== undefined) draft.priority = data.priority;
-      if (data.assignee_id !== undefined) draft.assignee_id = data.assignee_id;
+      if (data.assignee_ids !== undefined) draft.assignee_ids = data.assignee_ids;
       draft.updated_at = new Date().toISOString();
     });
 
@@ -852,17 +855,19 @@ export const ticketService = {
       });
     }
 
-    if (data.assignee_id !== undefined && data.assignee_id !== current.assignee_id) {
-      const newAssignee = data.assignee_id ? memberService.getById(data.assignee_id) : null;
-      const oldAssignee = current.assignee_id ? memberService.getById(current.assignee_id) : null;
-      activityService.log({
-        ticket_id: id,
-        member_id: updatedBy || null,
-        action: 'ASSIGNED',
-        old_value: oldAssignee?.name || null,
-        new_value: newAssignee?.name || null,
-        details: newAssignee ? `Assigned to ${newAssignee.name}` : 'Unassigned',
-      });
+    if (data.assignee_ids !== undefined) {
+      const newNames = data.assignee_ids.map(aid => memberService.getById(aid)?.name || '').filter(Boolean).join(', ');
+      const oldNames = current.assignee_ids.map(aid => memberService.getById(aid)?.name || '').filter(Boolean).join(', ');
+      if (newNames !== oldNames) {
+        activityService.log({
+          ticket_id: id,
+          member_id: updatedBy || null,
+          action: 'ASSIGNED',
+          old_value: oldNames || null,
+          new_value: newNames || null,
+          details: newNames ? `Assigned to ${newNames}` : 'Unassigned',
+        });
+      }
     }
 
     return this.getById(id);

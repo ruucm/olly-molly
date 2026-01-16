@@ -36,7 +36,7 @@ interface RunningJob {
 type UiTicket = Omit<Ticket, 'status' | 'priority'> & {
   status: string;
   priority: string;
-  assignee?: Member | null;
+  assignees: Member[];  // Multi-assignee support
 };
 
 type BoardMember = {
@@ -52,8 +52,8 @@ type BoardMember = {
 
 type TeamMember = BoardMember;
 
-type BoardTicket = Omit<UiTicket, 'assignee'> & {
-  assignee?: BoardMember | null;
+type BoardTicket = Omit<UiTicket, 'assignees'> & {
+  assignees: BoardMember[];  // Multi-assignee support
 };
 
 export default function Dashboard() {
@@ -91,7 +91,7 @@ export default function Dashboard() {
       : allTickets;
     return filtered.map((ticket) => ({
       ...ticket,
-      assignee: ticket.assignee_id ? membersById.get(ticket.assignee_id) || null : null,
+      assignees: (ticket.assignee_ids || []).map(id => membersById.get(id)).filter(Boolean) as BoardMember[],
     }));
   }, [allTickets, activeProjectId, membersById]);
 
@@ -143,7 +143,7 @@ export default function Dashboard() {
         title: data.title || 'New Ticket',
         description: data.description || undefined,
         priority: data.priority as Ticket['priority'] | undefined,
-        assignee_id: data.assignee_id || undefined,
+        assignee_ids: data.assignee_ids || [],
         project_id: activeProject?.id,
         created_by: data.created_by ?? undefined,
       });
@@ -161,7 +161,7 @@ export default function Dashboard() {
         description: data.description,
         status: data.status as Ticket['status'] | undefined,
         priority: data.priority as Ticket['priority'] | undefined,
-        assignee_id: data.assignee_id ?? undefined,
+        assignee_ids: data.assignee_ids,
       });
     } catch (error) {
       console.error('Failed to update ticket:', error);
@@ -260,14 +260,14 @@ export default function Dashboard() {
     title: string;
     description: string;
     priority: string;
-    assignee_id: string | null;
+    assignee_ids: string[];
     deleteOriginals: boolean;
   }) => {
     const newTicket = ticketService.create({
       title: data.title,
       description: data.description,
       priority: data.priority as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
-      assignee_id: data.assignee_id || undefined,
+      assignee_ids: data.assignee_ids,
       project_id: activeProject?.id,
     });
 
@@ -291,7 +291,12 @@ export default function Dashboard() {
       priority: 'MEDIUM'
     });
     if (newTicket) {
-      setSelectedTicket(newTicket);
+      // Convert to BoardTicket with assignees array
+      const boardTicket: BoardTicket = {
+        ...newTicket,
+        assignees: [],
+      };
+      setSelectedTicket(boardTicket);
       setTicketSidebarOpen(true);
     }
   };

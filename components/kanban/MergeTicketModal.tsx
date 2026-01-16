@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Textarea } from '@/components/ui/Textarea';
 import { Select } from '@/components/ui/Select';
 
 interface Member {
@@ -20,8 +19,8 @@ interface Ticket {
     description?: string | null;
     status: string;
     priority: string;
-    assignee_id?: string | null;
-    assignee?: Member | null;
+    assignee_ids?: string[];
+    assignees?: Member[];
 }
 
 interface MergeTicketModalProps {
@@ -33,7 +32,7 @@ interface MergeTicketModalProps {
         title: string;
         description: string;
         priority: string;
-        assignee_id: string | null;
+        assignee_ids: string[];
         deleteOriginals: boolean;
     }) => void;
 }
@@ -62,29 +61,33 @@ export function MergeTicketModal({ isOpen, onClose, tickets, members, onMerge }:
         return priority?.value || 'MEDIUM';
     }, [tickets]);
 
-    const defaultAssigneeId = useMemo(() => {
-        if (tickets.length === 0) return '';
-        const assignedTicket = tickets.find(t => t.assignee_id);
-        return assignedTicket?.assignee_id || '';
+    // Collect all unique assignee IDs from selected tickets
+    const defaultAssigneeIds = useMemo(() => {
+        const ids = new Set<string>();
+        tickets.forEach(t => {
+            (t.assignee_ids || []).forEach(id => ids.add(id));
+        });
+        return Array.from(ids);
     }, [tickets]);
 
     const [title, setTitle] = useState(defaultTitle);
-    const [assigneeId, setAssigneeId] = useState(defaultAssigneeId);
+    const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>(defaultAssigneeIds);
     const [priority, setPriority] = useState(defaultPriority);
     const [deleteOriginals, setDeleteOriginals] = useState(true);
 
     // Update defaults when tickets change
-    useMemo(() => {
+    useEffect(() => {
         setTitle(defaultTitle);
-        setAssigneeId(defaultAssigneeId);
+        setSelectedAssigneeIds(defaultAssigneeIds);
         setPriority(defaultPriority);
-    }, [defaultTitle, defaultAssigneeId, defaultPriority]);
+    }, [defaultTitle, defaultAssigneeIds, defaultPriority]);
 
     // Build merged description
     const mergedDescription = useMemo(() => {
         const parts = tickets.map(ticket => {
-            const assigneeInfo = ticket.assignee
-                ? `> **담당자**: ${ticket.assignee.avatar || ''} ${ticket.assignee.name}`
+            const assigneeNames = (ticket.assignees || []).map(a => `${a.avatar || ''} ${a.name}`).join(', ');
+            const assigneeInfo = assigneeNames
+                ? `> **담당자**: ${assigneeNames}`
                 : '';
             const priorityInfo = `> **우선순위**: ${ticket.priority}`;
 
@@ -94,12 +97,15 @@ export function MergeTicketModal({ isOpen, onClose, tickets, members, onMerge }:
         return `# Merged Ticket Summary\n\n이 티켓은 ${tickets.length}개의 티켓을 병합하여 생성되었습니다.\n\n---\n\n${parts.join('\n\n---\n\n')}`;
     }, [tickets]);
 
-    const memberOptions = [
-        { value: '', label: 'Unassigned' },
-        ...members
-            .filter(m => m.role !== 'PM')
-            .map(m => ({ value: m.id, label: `${m.avatar} ${m.name}` }))
-    ];
+    const availableMembers = members.filter(m => m.role !== 'PM');
+
+    const toggleAssignee = (memberId: string) => {
+        setSelectedAssigneeIds(prev =>
+            prev.includes(memberId)
+                ? prev.filter(id => id !== memberId)
+                : [...prev, memberId]
+        );
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -107,7 +113,7 @@ export function MergeTicketModal({ isOpen, onClose, tickets, members, onMerge }:
             title,
             description: mergedDescription,
             priority,
-            assignee_id: assigneeId || null,
+            assignee_ids: selectedAssigneeIds,
             deleteOriginals,
         });
         onClose();
@@ -134,8 +140,11 @@ export function MergeTicketModal({ isOpen, onClose, tickets, members, onMerge }:
                                 key={ticket.id}
                                 className="px-2 py-1 text-xs bg-[var(--bg-secondary)] rounded border border-[var(--border-primary)] flex items-center gap-1"
                             >
-                                {ticket.assignee && (
-                                    <span>{ticket.assignee.avatar}</span>
+                                {(ticket.assignees || []).slice(0, 2).map(a => (
+                                    <span key={a.id}>{a.avatar}</span>
+                                ))}
+                                {(ticket.assignees || []).length > 2 && (
+                                    <span className="text-[var(--text-muted)]">+{(ticket.assignees || []).length - 2}</span>
                                 )}
                                 <span className="text-[var(--text-primary)] max-w-[150px] truncate">
                                     {ticket.title}
@@ -154,20 +163,38 @@ export function MergeTicketModal({ isOpen, onClose, tickets, members, onMerge }:
                     required
                 />
 
-                <div className="grid grid-cols-2 gap-4">
-                    <Select
-                        label="대표 담당자"
-                        value={assigneeId}
-                        onChange={setAssigneeId}
-                        options={memberOptions}
-                    />
-                    <Select
-                        label="우선순위"
-                        value={priority}
-                        onChange={setPriority}
-                        options={priorityOptions}
-                    />
+                {/* Multi-assignee selection */}
+                <div>
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+                        담당자 ({selectedAssigneeIds.length}명 선택)
+                    </label>
+                    <div className="flex flex-wrap gap-2 p-3 bg-[var(--bg-tertiary)] rounded-lg border border-[var(--border-primary)] max-h-32 overflow-y-auto">
+                        {availableMembers.map(member => (
+                            <button
+                                key={member.id}
+                                type="button"
+                                onClick={() => toggleAssignee(member.id)}
+                                className={`px-3 py-1.5 text-xs rounded-full border transition-colors flex items-center gap-1.5 ${selectedAssigneeIds.includes(member.id)
+                                        ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400'
+                                        : 'bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-secondary)] hover:border-indigo-400'
+                                    }`}
+                            >
+                                <span>{member.avatar}</span>
+                                <span>{member.name}</span>
+                                {selectedAssigneeIds.includes(member.id) && (
+                                    <span className="ml-1">✓</span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
                 </div>
+
+                <Select
+                    label="우선순위"
+                    value={priority}
+                    onChange={setPriority}
+                    options={priorityOptions}
+                />
 
                 {/* Description preview */}
                 <div>

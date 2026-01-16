@@ -43,8 +43,8 @@ interface Ticket {
     description?: string | null;
     status: string;
     priority: string;
-    assignee_id?: string | null;
-    assignee?: Member | null;
+    assignee_ids: string[];
+    assignees: Member[];
 }
 
 interface TicketSidebarProps {
@@ -153,7 +153,8 @@ export function TicketSidebar({
             setDescription(ticket.description || '');
             setStatus(ticket.status);
             setPriority(ticket.priority);
-            setAssigneeId(ticket.assignee_id || '');
+            // For now, use first assignee for the single select UI
+            setAssigneeId(ticket.assignee_ids?.[0] || '');
             setShowTicketDetails(true);
             // Reset executing state and conversation selection when switching tickets
             setExecuting(false);
@@ -288,9 +289,10 @@ export function TicketSidebar({
                     if (completionStatus === 'completed') {
                         setStatus('IN_REVIEW');
                         onTicketUpdate(ticket.id, { status: 'IN_REVIEW' });
-                        if (ticket.assignee) {
-                            const agentName = ticket.assignee.name;
-                            const agentIcon = roleProfileImages[ticket.assignee.role] || '/app-icon.png';
+                        const firstAssignee = ticket.assignees?.[0];
+                        if (firstAssignee) {
+                            const agentName = firstAssignee.name;
+                            const agentIcon = roleProfileImages[firstAssignee.role] || '/app-icon.png';
                             showNotification(
                                 `✅ ${agentName} 작업 완료!`,
                                 `"${ticket.title}" 작업이 완료되어 리뷰 대기 중입니다.`,
@@ -313,7 +315,7 @@ export function TicketSidebar({
             cancelled = true;
             clearInterval(interval);
         };
-    }, [ticket?.id, selectedConversationId, onTicketUpdate, currentJobId, ticket?.assignee, ticket?.title]);
+    }, [ticket?.id, selectedConversationId, onTicketUpdate, currentJobId, ticket?.assignees, ticket?.title]);
 
     const persistTicketDetails = async () => {
         if (!ticket) return;
@@ -322,7 +324,7 @@ export function TicketSidebar({
             description: description || null,
             status,
             priority,
-            assignee_id: assigneeId || null,
+            assignee_ids: assigneeId ? [assigneeId] : [],
         });
     };
 
@@ -548,9 +550,9 @@ export function TicketSidebar({
                     >
                         <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-primary">🤖 AI Agent</span>
-                            {ticket.assignee && (
+                            {ticket.assignees?.[0] && (
                                 <span className="text-xs text-muted">
-                                    {ticket.assignee.avatar} {ticket.assignee.name}
+                                    {ticket.assignees[0].avatar} {ticket.assignees[0].name}
                                 </span>
                             )}
                         </div>

@@ -35,8 +35,8 @@ interface Ticket {
     description?: string | null;
     status: string;
     priority: string;
-    assignee_id?: string | null;
-    assignee?: Member | null;
+    assignee_ids: string[];
+    assignees: Member[];
 }
 
 interface RunningJob {
@@ -50,7 +50,7 @@ interface KanbanBoardProps {
     tickets: Ticket[];
     members: Member[];
     onTicketUpdate: (id: string, data: Partial<Ticket>) => void | Promise<void>;
-    onTicketCreate: (data: Partial<Ticket>) => void | Promise<Ticket | null>;
+    onTicketCreate: (data: Partial<Ticket>) => void;
     onTicketDelete: (id: string) => void | Promise<void>;
     onTicketsReorder?: (tickets: Ticket[]) => void;
     hasActiveProject?: boolean;

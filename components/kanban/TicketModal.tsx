@@ -36,8 +36,8 @@ interface Ticket {
     description?: string | null;
     status: string;
     priority: string;
-    assignee_id?: string | null;
-    assignee?: Member | null;
+    assignee_ids: string[];
+    assignees: Member[];
     created_at?: string;
     updated_at?: string;
 }
@@ -96,7 +96,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
     const [description, setDescription] = useState(ticket?.description || '');
     const [status, setStatus] = useState(ticket?.status || 'TODO');
     const [priority, setPriority] = useState(ticket?.priority || 'MEDIUM');
-    const [assigneeId, setAssigneeId] = useState(ticket?.assignee_id || '');
+    const [assigneeId, setAssigneeId] = useState(ticket?.assignee_ids?.[0] || '');
     const [showLogs, setShowLogs] = useState(false);
     const [showWorkLogs, setShowWorkLogs] = useState(false);
     const [workLogs, setWorkLogs] = useState<WorkLog[]>([]);
@@ -130,7 +130,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             setDescription(ticket.description || '');
             setStatus(ticket.status);
             setPriority(ticket.priority);
-            setAssigneeId(ticket.assignee_id || '');
+            setAssigneeId(ticket.assignee_ids?.[0] || '');
         }
     }, [ticket]);
 
@@ -196,12 +196,12 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             description: description || null,
             status,
             priority,
-            assignee_id: assigneeId || null,
+            assignee_ids: assigneeId ? [assigneeId] : [],
         });
     };
 
     const handleExecuteAgent = async () => {
-        if (!ticket || !ticket.assignee_id) return;
+        if (!ticket || ticket.assignee_ids.length === 0) return;
 
         setExecuting(true);
 
@@ -211,10 +211,10 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                 description: description || null,
                 status,
                 priority,
-                assignee_id: assigneeId || null,
+                assignee_ids: assigneeId ? [assigneeId] : [],
             }));
 
-            const agent = members.find((member) => member.id === ticket.assignee_id);
+            const agent = members.find((member) => member.id === ticket.assignee_ids[0]);
             const project = projectService.getActive();
             if (!agent || !project) {
                 throw new Error('Missing agent or active project for execution');
@@ -349,7 +349,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                 />
 
                 {/* Agent Execution Section */}
-                {isEditing && ticket && ticket.assignee_id && (
+                {isEditing && ticket && ticket.assignee_ids.length > 0 && (
                     <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg space-y-3">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">

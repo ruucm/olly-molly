@@ -10,7 +10,8 @@ interface Ticket {
     description?: string | null;
     status: string;
     priority: string;
-    assignee?: {
+    assignee_ids: string[];
+    assignees: {
         id: string;
         name: string;
         avatar?: string | null;
@@ -19,7 +20,7 @@ interface Ticket {
         is_default: number;
         can_generate_images: number;
         can_log_screenshots: number;
-    } | null;
+    }[];
 }
 
 interface SortableTicketProps {

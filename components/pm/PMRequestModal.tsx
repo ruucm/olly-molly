@@ -97,7 +97,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                         title: task.title,
                         description: task.description,
                         priority: task.priority,
-                        assignee_id: assigneeId || undefined,
+                        assignee_ids: assigneeId ? [assigneeId] : [],
                         project_id: projectId,
                         created_by: memberService.getByRole('PM')?.id || undefined,
                     });
@@ -240,8 +240,8 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                 <button
                     onClick={() => { setActiveTab('request'); setError(null); }}
                     className={`px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'request'
-                            ? 'text-[var(--accent-primary)] border-b-2 border-[var(--accent-primary)]'
-                            : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                        ? 'text-[var(--accent-primary)] border-b-2 border-[var(--accent-primary)]'
+                        : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
                         }`}
                 >
                     🛠️ 작업 요청
@@ -249,8 +249,8 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                 <button
                     onClick={() => { setActiveTab('ask'); setError(null); }}
                     className={`px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'ask'
-                            ? 'text-[var(--accent-primary)] border-b-2 border-[var(--accent-primary)]'
-                            : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                        ? 'text-[var(--accent-primary)] border-b-2 border-[var(--accent-primary)]'
+                        : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
                         }`}
                 >
                     💬 질문하기
