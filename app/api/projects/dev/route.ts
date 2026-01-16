@@ -425,10 +425,14 @@ export async function POST(request: NextRequest) {
 
             const port = await findAvailablePort(3001);
 
-            // Start npm run dev
-            const devProcess = spawn('npm', ['run', 'dev', '--', '--port', String(port)], {
+            // Start npm run dev via the user's shell so PATH/NVM matches terminal runs.
+            const npmCommand = process.platform === 'win32'
+                ? { cmd: 'cmd.exe', args: ['/c', `npm run dev -- --port ${port}`] }
+                : { cmd: process.env.SHELL || '/bin/zsh', args: ['-lc', `npm run dev -- --port ${port}`] };
+
+            const devProcess = spawn(npmCommand.cmd, npmCommand.args, {
                 cwd: workingDir,
-                shell: true,
+                shell: false,
                 stdio: ['ignore', 'pipe', 'pipe'],
                 detached: false,
                 env: {
