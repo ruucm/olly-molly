@@ -6,7 +6,7 @@ import path from 'path';
 
 async function runCreateNextApp(targetPath: string): Promise<void> {
     const isWin = process.platform === 'win32';
-    const cmd = isWin ? 'npx.cmd' : 'npx';
+    const cmd = 'npx';
     const args = [
         'create-next-app@latest',
         targetPath,
@@ -18,6 +18,9 @@ async function runCreateNextApp(targetPath: string): Promise<void> {
         const child = spawn(cmd, args, {
             stdio: ['ignore', 'pipe', 'pipe'],
             env: process.env,
+            cwd: os.homedir(),
+            shell: isWin,
+            windowsHide: true,
         });
 
         let output = '';
