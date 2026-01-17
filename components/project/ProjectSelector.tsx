@@ -119,11 +119,10 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         setCreateProgress('🚀 Next.js 프로젝트 생성 중... (1-2분 소요)');
 
         try {
-            const res = await fetch('/api/projects/dev', {
+            const res = await fetch('/api/projects/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    action: 'create',
                     projectName: createName.trim(),
                 }),
             });
