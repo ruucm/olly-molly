@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import os from 'os';
 
 // Store running dev servers (in-memory, per process)
 const runningServers: Map<string, { process: ChildProcess; port?: number }> = new Map();
+
+// Detect OS
+const isWin = process.platform === 'win32';
 
 // Find available port starting from 3001
 async function findAvailablePort(startPort: number = 3001): Promise<number> {
@@ -19,7 +23,7 @@ async function findAvailablePort(startPort: number = 3001): Promise<number> {
     });
 }
 
-// POST: Start dev server for a project
+// POST: Manage dev server (create, start, stop, status)
 export async function POST(request: Request) {
     try {
         const body = await request.json();
@@ -29,9 +33,10 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Project path is required' }, { status: 400 });
         }
 
-        // Expand ~ to home directory
+        // Expand ~ to home directory (Works on both Mac and Windows)
+        const homeDir = os.homedir();
         const expandedPath = projectPath.startsWith('~')
-            ? path.join(process.env.HOME || '', projectPath.slice(1))
+            ? path.join(homeDir, projectPath.slice(1))
             : projectPath;
 
         if (action === 'start') {
@@ -49,23 +54,23 @@ export async function POST(request: Request) {
             // Find available port
             const port = await findAvailablePort();
 
+            // Determine command based on OS (npm for Unix, npm.cmd for Windows)
+            const cmd = isWin ? 'npm.cmd' : 'npm';
+
             // Start the dev server
-            const devProcess = spawn('npm', ['run', 'dev', '--', '-p', String(port)], {
+            // On macOS/Linux, we use detached: true to create a new process group for clean killing.
+            const devProcess = spawn(cmd, ['run', 'dev', '--', '-p', String(port)], {
                 cwd: expandedPath,
                 env: { ...process.env, BROWSER: 'none' },
-                detached: true,
+                detached: !isWin, // Only detach on Unix to enable group killing (-pid)
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
 
             let output = '';
-            let serverReady = false;
 
             devProcess.stdout?.on('data', (data) => {
                 output += data.toString();
                 console.log(`[${path.basename(expandedPath)}] ${data.toString()}`);
-                if (output.includes('Ready') || output.includes('ready') || output.includes(`localhost:${port}`)) {
-                    serverReady = true;
-                }
             });
 
             devProcess.stderr?.on('data', (data) => {
@@ -89,7 +94,7 @@ export async function POST(request: Request) {
             // Unref so it doesn't block the parent process
             devProcess.unref();
 
-            // Wait a bit for the server to start
+            // Wait a bit to ensure server initialization
             await new Promise((resolve) => setTimeout(resolve, 2000));
 
             return NextResponse.json({
@@ -100,14 +105,17 @@ export async function POST(request: Request) {
             });
         } else if (action === 'stop') {
             const server = runningServers.get(expandedPath);
-            if (server) {
+            if (server && server.process.pid) {
                 try {
-                    // Kill the process group
-                    if (server.process.pid) {
+                    if (isWin) {
+                        // Windows: Use taskkill to kill the process tree forcefully
+                        spawn('taskkill', ['/pid', server.process.pid.toString(), '/f', '/t']);
+                    } else {
+                        // macOS/Linux: Kill the process group (negative PID)
                         process.kill(-server.process.pid, 'SIGTERM');
                     }
                 } catch (e) {
-                    // Process might already be dead
+                    console.error('Error stopping process:', e);
                 }
                 runningServers.delete(expandedPath);
                 return NextResponse.json({ success: true, message: 'Dev server stopped' });
