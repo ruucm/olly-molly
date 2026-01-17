@@ -1,241 +1,161 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, Play, RefreshCcw, Square } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ExternalLink, Play, Square } from 'lucide-react';
 import { Icon } from '@/components/ui';
+import { useProjects, type Project } from '@/lib/client-db';
 
-interface DevServerControlProps {
-    projectId: string | null;
-    projectName: string | null;
-    projectPath?: string | null;
-    relativePath?: string | null;
-    /**
-     * When false, only servers started by this dashboard are considered "running".
-     * This disables OS-wide external dev server detection and external stop.
-     */
-    detectExternal?: boolean;
+interface DevServer {
+    path: string;
+    port?: number;
+    pid?: number;
 }
 
-export function DevServerControl({
-    projectId,
-    projectName,
-    projectPath,
-    relativePath,
-    detectExternal = true,
-}: DevServerControlProps) {
-    const [running, setRunning] = useState(false);
-    const [port, setPort] = useState<number | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [external, setExternal] = useState(false); // True if server was started externally
+export function DevServerControl() {
+    const projects = useProjects();
+    const [runningServers, setRunningServers] = useState<DevServer[]>([]);
+    const [starting, setStarting] = useState<string | null>(null);
 
-    // Check server status
-    const checkStatus = useCallback(async () => {
-        if (!projectId) return;
+    // Get the active project
+    const activeProject = projects.find((p) => p.is_active) || null;
 
-        try {
-            const params = new URLSearchParams({ projectId });
-            if (projectPath) {
-                params.set('projectPath', projectPath);
-            }
-            if (relativePath) {
-                params.set('path', relativePath);
-            }
-            if (!detectExternal) {
-                params.set('external', '0');
-            }
-            const res = await fetch(`/api/projects/dev?${params.toString()}`);
-            const data = await res.json();
-            setRunning(data.running);
-            setPort(data.port || null);
-            setExternal(data.external || false);
-        } catch (error) {
-            console.error('Failed to check dev server status:', error);
-        }
-    }, [projectId, projectPath, relativePath, detectExternal]);
-
+    // Fetch running servers status
     useEffect(() => {
-        checkStatus();
-        // Poll status every 5 seconds
-        const interval = setInterval(checkStatus, 5000);
+        const fetchStatus = async () => {
+            try {
+                const res = await fetch('/api/projects/dev');
+                const data = await res.json();
+                setRunningServers(data.servers || []);
+            } catch (err) {
+                console.error('Failed to fetch dev server status:', err);
+            }
+        };
+
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 5000);
         return () => clearInterval(interval);
-    }, [checkStatus]);
+    }, []);
 
-    // Reset state when project changes
-    useEffect(() => {
-        setRunning(false);
-        setPort(null);
-        setExternal(false);
-        checkStatus();
-    }, [projectId, relativePath, checkStatus]);
+    const isActiveProjectRunning = activeProject
+        ? runningServers.some((s) => s.path.endsWith(activeProject.path.replace('~', '')) || activeProject.path.includes(s.path.split('/').pop() || ''))
+        : false;
 
-    const handleStart = async () => {
-        if (!projectId) return;
-
-        setLoading(true);
-        try {
-            const res = await fetch('/api/projects/dev', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'start', projectId, projectPath, path: relativePath || undefined }),
-            });
-
-            const data = await res.json();
-            if (data.success) {
-                setRunning(true);
-                setPort(data.port);
-                setExternal(false);
-            } else {
-                alert([data.error || 'Failed to start dev server', data.output ? `\n\n---\n${data.output}` : ''].join(''));
-            }
-        } catch (error) {
-            alert('Failed to start dev server');
-        } finally {
-            setLoading(false);
-        }
+    const getServerForProject = (project: Project | null) => {
+        if (!project) return null;
+        const expandedPath = project.path.startsWith('~')
+            ? project.path.replace('~', process.env.HOME || '')
+            : project.path;
+        return runningServers.find((s) => s.path === expandedPath || s.path.endsWith(project.path.replace('~/', '')));
     };
 
-    const handleForceRestart = async () => {
-        if (!projectId) return;
+    const activeServer = getServerForProject(activeProject);
 
-        setLoading(true);
+    const handleStart = async () => {
+        if (!activeProject) return;
+
+        setStarting(activeProject.path);
         try {
-            // Best-effort: stop (including external) and clear stale Next dev lock, then start again.
-            await fetch('/api/projects/dev', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'stop',
-                    projectId,
-                    projectPath,
-                    path: relativePath || undefined,
-                    killExternal: true,
-                    cleanNextLock: true,
-                }),
-            }).catch(() => undefined);
-
             const res = await fetch('/api/projects/dev', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'start', projectId, projectPath, path: relativePath || undefined }),
+                body: JSON.stringify({ projectPath: activeProject.path, action: 'start' }),
             });
+
             const data = await res.json();
-            if (data.success) {
-                setRunning(true);
-                setPort(data.port);
-                setExternal(false);
-            } else {
-                alert(data.error || 'Failed to restart dev server');
+
+            if (data.success && data.port) {
+                // Update local state immediately
+                setRunningServers((prev) => [
+                    ...prev.filter((s) => !s.path.includes(activeProject.path.replace('~/', ''))),
+                    { path: activeProject.path, port: data.port, pid: data.pid },
+                ]);
+                // Open in browser
+                window.open(`http://localhost:${data.port}`, '_blank');
             }
-        } catch {
-            alert('Failed to restart dev server');
+        } catch (err) {
+            console.error('Failed to start dev server:', err);
         } finally {
-            setLoading(false);
+            setStarting(null);
         }
     };
 
     const handleStop = async () => {
-        if (!projectId) return;
+        if (!activeProject) return;
 
-        setLoading(true);
         try {
-            const res = await fetch('/api/projects/dev', {
+            await fetch('/api/projects/dev', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'stop',
-                    projectId,
-                    projectPath,
-                    path: relativePath || undefined,
-                    killExternal: detectExternal,
-                    cleanNextLock: true,
-                }),
+                body: JSON.stringify({ projectPath: activeProject.path, action: 'stop' }),
             });
 
-            const data = await res.json();
-            if (data.success) {
-                setRunning(false);
-                setPort(null);
-            }
-        } catch (error) {
-            console.error('Failed to stop dev server:', error);
-        } finally {
-            setLoading(false);
+            // Update local state immediately
+            setRunningServers((prev) =>
+                prev.filter((s) => !s.path.includes(activeProject.path.replace('~/', '')))
+            );
+        } catch (err) {
+            console.error('Failed to stop dev server:', err);
         }
     };
 
-    const handleOpen = () => {
-        if (port) {
-            window.open(`http://localhost:${port}`, '_blank');
+    const handleOpenBrowser = () => {
+        if (activeServer?.port) {
+            window.open(`http://localhost:${activeServer.port}`, '_blank');
         }
     };
 
-    if (!projectId) return null;
+    if (!activeProject) {
+        return null;
+    }
+
+    const isStarting = starting === activeProject.path;
+    const isRunning = !!activeServer;
 
     return (
         <div className="flex items-center gap-1">
-            {!running ? (
+            {isRunning ? (
                 <>
-                    <button
-                        onClick={handleStart}
-                        disabled={loading}
-                        className={`p-1.5 rounded-lg transition-colors ${loading
-                            ? 'text-[var(--text-muted)] cursor-not-allowed'
-                            : 'text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300'
-                            }`}
-                        title="Start dev server (npm run dev)"
+                    <span
+                        className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-emerald-500/10 text-emerald-400"
+                        title="Running from dashboard"
                     >
-                        {loading ? (
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                            </svg>
-                        ) : (
-                            <Icon icon={Play} />
-                        )}
-                    </button>
-                    <button
-                        onClick={handleForceRestart}
-                        disabled={loading}
-                        className={`p-1.5 rounded-lg transition-colors ${loading
-                            ? 'text-[var(--text-muted)] cursor-not-allowed'
-                            : 'text-amber-400 hover:bg-amber-500/10 hover:text-amber-300'
-                            }`}
-                        title="Force restart (kill + clear Next dev lock)"
-                    >
-                        <Icon icon={RefreshCcw} />
-                    </button>
-                </>
-            ) : (
-                <>
-                    <span className={`flex items-center gap-1 px-2 py-1 text-xs rounded ${external
-                        ? 'bg-amber-500/10 text-amber-400'
-                        : 'bg-emerald-500/10 text-emerald-400'
-                        }`}
-                        title={external ? 'Running externally (started from terminal)' : 'Running from dashboard'}
-                    >
-                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${external ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                        :{port}
-                        {external && <span className="text-[10px] opacity-70">ext</span>}
+                        <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-emerald-400" />
+                        :{activeServer?.port}
                     </span>
                     <button
-                        onClick={handleOpen}
+                        onClick={handleOpenBrowser}
                         className="p-1.5 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 rounded-lg transition-colors"
-                        title="Open in browser"
+                        title={`http://localhost:${activeServer?.port}`}
                     >
                         <Icon icon={ExternalLink} />
                     </button>
                     <button
                         onClick={handleStop}
-                        disabled={loading}
-                        className={`p-1.5 rounded-lg transition-colors ${loading
-                            ? 'text-[var(--text-muted)] cursor-not-allowed'
-                            : 'text-red-400 hover:bg-red-500/10 hover:text-red-300'
-                            }`}
-                        title={external ? 'Stop external dev server' : 'Stop dev server'}
+                        className="p-1.5 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors"
+                        title="Stop dev server"
                     >
                         <Icon icon={Square} />
                     </button>
                 </>
+            ) : (
+                <button
+                    onClick={handleStart}
+                    disabled={isStarting}
+                    className={`p-1.5 rounded-lg transition-colors ${isStarting
+                        ? 'text-[var(--text-muted)] cursor-not-allowed'
+                        : 'text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300'
+                        }`}
+                    title="Start dev server (npm run dev)"
+                >
+                    {isStarting ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                    ) : (
+                        <Icon icon={Play} />
+                    )}
+                </button>
             )}
         </div>
     );

@@ -6,7 +6,7 @@ import { KanbanBoard, TicketSidebar, MergeTicketModal } from '@/components/kanba
 import { TeamPanel } from '@/components/team';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { PMRequestModal } from '@/components/pm';
-import { ProjectSelector, DevServerControl, ProjectArtifactsModal } from '@/components/project';
+import { ProjectSelector, ProjectArtifactsModal, DevServerControl } from '@/components/project';
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import { Icon } from '@/components/ui';
@@ -340,11 +340,7 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-2">
             <ProjectSelector onProjectChange={handleProjectChange} />
-            <DevServerControl
-              projectId={activeProject?.id || null}
-              projectName={activeProject?.name || null}
-              projectPath={activeProject?.path || null}
-            />
+            <DevServerControl />
             <Button
               variant="ghost"
               size="sm"

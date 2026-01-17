@@ -6,7 +6,6 @@ import remarkGfm from 'remark-gfm';
 import { Modal } from '@/components/ui/Modal';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import { Button } from '@/components/ui/Button';
-import { DevServerControl } from './DevServerControl';
 
 interface ProjectArtifactsModalProps {
     isOpen: boolean;
@@ -991,17 +990,11 @@ export function ProjectArtifactsModal({
                                                     const label = site.name || (site.path ? site.path.split('/').pop() : 'root');
                                                     const displayPath = site.path || '.';
                                                     return (
-                                                        <div key={site.id} className="flex items-center justify-between px-4 py-3">
+                                                        <div key={site.id} className="px-4 py-3">
                                                             <div className="min-w-0">
                                                                 <div className="text-sm text-[var(--text-primary)] truncate">{label}</div>
                                                                 <div className="text-xs text-[var(--text-muted)] truncate">{displayPath}</div>
                                                             </div>
-                                                            <DevServerControl
-                                                                projectId={projectId}
-                                                                projectName={projectName || null}
-                                                                projectPath={projectPath || null}
-                                                                relativePath={site.path}
-                                                            />
                                                         </div>
                                                     );
                                                 })}
