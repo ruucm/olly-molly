@@ -57,6 +57,15 @@ export async function POST(request: Request) {
             // Determine command based on OS (npm for Unix, npm.cmd for Windows)
             const cmd = isWin ? 'npm.cmd' : 'npm';
 
+            // Log environment info for debugging
+            console.log('=== Dev Server Start Debug Info ===');
+            console.log('Node Path (process.execPath):', process.execPath);
+            console.log('Node Version:', process.version);
+            console.log('PATH env:', process.env.PATH);
+            console.log('Project Path:', expandedPath);
+            console.log('Command:', cmd, ['run', 'dev', '--', '-p', String(port)].join(' '));
+            console.log('===================================');
+
             // Start the dev server
             // On macOS/Linux, we use detached: true to create a new process group for clean killing.
             const devProcess = spawn(cmd, ['run', 'dev', '--', '-p', String(port)], {
