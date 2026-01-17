@@ -384,11 +384,11 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <span className="font-medium text-[var(--text-primary)]">{project.name}</span>
-                                                {project.is_active && (
+                                                {project.is_active ? (
                                                     <span className="px-1.5 py-0.5 text-xs bg-emerald-500/20 text-emerald-400 rounded">
                                                         Active
                                                     </span>
-                                                )}
+                                                ) : ""}
                                             </div>
                                             <p className="text-xs text-[var(--text-muted)] truncate mt-1">{project.path}</p>
                                         </div>
