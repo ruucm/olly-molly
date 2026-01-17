@@ -115,6 +115,60 @@ type StoreName = (typeof STORE_NAMES)[keyof typeof STORE_NAMES];
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
+const DB_BACKUP_VERSION = 1;
+const BACKUP_STORE_NAMES: StoreName[] = [
+  STORE_NAMES.members,
+  STORE_NAMES.tickets,
+  STORE_NAMES.activityLogs,
+  STORE_NAMES.projects,
+  STORE_NAMES.agentWorkLogs,
+  STORE_NAMES.conversations,
+  STORE_NAMES.conversationMessages,
+  STORE_NAMES.meta,
+];
+
+export type DbBackup = {
+  version: number;
+  exported_at: string;
+  stores: Record<string, unknown[]>;
+};
+
+export async function exportDbBackup(): Promise<DbBackup> {
+  const db = await getIdb();
+  const stores: Record<string, unknown[]> = {};
+  await Promise.all(
+    BACKUP_STORE_NAMES.map(async (storeName) => {
+      stores[storeName] = await db.getAll(storeName);
+    }),
+  );
+  return {
+    version: DB_BACKUP_VERSION,
+    exported_at: new Date().toISOString(),
+    stores,
+  };
+}
+
+export async function importDbBackup(backup: DbBackup): Promise<void> {
+  if (!backup || typeof backup !== 'object') {
+    throw new Error('Invalid backup file.');
+  }
+  if (backup.version !== DB_BACKUP_VERSION) {
+    throw new Error(`Unsupported backup version: ${backup.version}`);
+  }
+
+  const db = await getIdb();
+  const tx = db.transaction(BACKUP_STORE_NAMES, 'readwrite');
+  await Promise.all(
+    BACKUP_STORE_NAMES.map(async (storeName) => {
+      const store = tx.objectStore(storeName);
+      await store.clear();
+      const rows = Array.isArray(backup.stores?.[storeName]) ? backup.stores[storeName] : [];
+      await Promise.all(rows.map((row) => store.put(row)));
+    }),
+  );
+  await tx.done;
+}
+
 function getIdb(): Promise<IDBPDatabase> {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('IndexedDB is only available in the browser.'));
@@ -1001,4 +1055,3 @@ export const collections = {
   conversationsCollection,
   conversationMessagesCollection,
 };
-

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { Modal } from './Modal';
 import { Button } from './Button';
+import { exportDbBackup, importDbBackup } from '@/lib/client-db';
 
 export interface ImageGeneratorSettings {
     provider: 'comfyui' | 'nanobanana' | 'off';
@@ -71,12 +72,21 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
     const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
     const [testMessage, setTestMessage] = useState('');
     const [saving, setSaving] = useState(false);
+    const [backupStatus, setBackupStatus] = useState<'idle' | 'working' | 'success' | 'error'>('idle');
+    const [backupMessage, setBackupMessage] = useState('');
+    const [restoreStatus, setRestoreStatus] = useState<'idle' | 'working' | 'success' | 'error'>('idle');
+    const [restoreMessage, setRestoreMessage] = useState('');
+    const restoreInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         if (isOpen) {
             loadImageSettingsFromServer().then(setSettings);
             setTestStatus('idle');
             setTestMessage('');
+            setBackupStatus('idle');
+            setBackupMessage('');
+            setRestoreStatus('idle');
+            setRestoreMessage('');
         }
     }, [isOpen]);
 
@@ -133,6 +143,60 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
             return !!settings.geminiApiKey;
         }
         return false;
+    };
+
+    const handleBackupDownload = async () => {
+        setBackupStatus('working');
+        setBackupMessage('');
+        try {
+            const backup = await exportDbBackup();
+            const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const timestamp = new Date()
+                .toISOString()
+                .replace(/[:.]/g, '')
+                .replace('T', '_')
+                .slice(0, 15);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `olly-molly-backup-${timestamp}.json`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            setBackupStatus('success');
+            setBackupMessage('백업 파일이 다운로드되었습니다.');
+        } catch (error) {
+            setBackupStatus('error');
+            setBackupMessage(error instanceof Error ? error.message : '백업에 실패했습니다.');
+        }
+    };
+
+    const handleRestoreClick = () => {
+        restoreInputRef.current?.click();
+    };
+
+    const handleRestoreFile = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        event.target.value = '';
+
+        const confirmed = window.confirm('복원하면 현재 데이터가 모두 덮어써집니다. 진행할까요?');
+        if (!confirmed) return;
+
+        setRestoreStatus('working');
+        setRestoreMessage('');
+        try {
+            const text = await file.text();
+            const parsed = JSON.parse(text);
+            await importDbBackup(parsed);
+            setRestoreStatus('success');
+            setRestoreMessage('복원이 완료되었습니다. 새로고침 후 적용됩니다.');
+            window.setTimeout(() => window.location.reload(), 800);
+        } catch (error) {
+            setRestoreStatus('error');
+            setRestoreMessage(error instanceof Error ? error.message : '복원에 실패했습니다.');
+        }
     };
 
     return (
@@ -253,6 +317,55 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
                         )}
                     </div>
                 )}
+
+                {/* DB Backup & Restore */}
+                <div className="pt-2 border-t border-[var(--border-primary)] space-y-3">
+                    <div>
+                        <label className="block text-xs font-medium text-[var(--text-secondary)]">
+                            DB 백업 & 복원
+                        </label>
+                        <p className="mt-1 text-xs text-[var(--text-muted)]">
+                            현재 IndexedDB 데이터를 JSON 파일로 저장하거나 복원합니다.
+                        </p>
+                    </div>
+                    <div className="flex gap-2">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleBackupDownload}
+                            disabled={backupStatus === 'working' || restoreStatus === 'working'}
+                        >
+                            {backupStatus === 'working' ? '백업 중...' : '백업 다운로드'}
+                        </Button>
+                        <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={handleRestoreClick}
+                            disabled={backupStatus === 'working' || restoreStatus === 'working'}
+                        >
+                            {restoreStatus === 'working' ? '복원 중...' : '복원하기'}
+                        </Button>
+                        <input
+                            ref={restoreInputRef}
+                            type="file"
+                            accept="application/json"
+                            className="hidden"
+                            onChange={handleRestoreFile}
+                        />
+                    </div>
+                    {backupStatus === 'success' && (
+                        <p className="text-xs text-green-500">{backupMessage}</p>
+                    )}
+                    {backupStatus === 'error' && (
+                        <p className="text-xs text-red-500">{backupMessage}</p>
+                    )}
+                    {restoreStatus === 'success' && (
+                        <p className="text-xs text-green-500">{restoreMessage}</p>
+                    )}
+                    {restoreStatus === 'error' && (
+                        <p className="text-xs text-red-500">{restoreMessage}</p>
+                    )}
+                </div>
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-4 border-t border-[var(--border-primary)]">
