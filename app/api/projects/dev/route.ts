@@ -66,11 +66,31 @@ export async function POST(request: Request) {
             console.log('Command:', cmd, ['run', 'dev', '--', '-p', String(port)].join(' '));
             console.log('===================================');
 
+            // Create clean environment, filtering out Electron/app-specific vars that can interfere with Next.js
+            const cleanEnv: Record<string, string> = {};
+            const excludePatterns = [
+                'ELECTRON', 'CHROME', 'NODE_OPTIONS',
+                '__NEXT', 'NEXT_', '__CFBundle',
+                'ORIGINAL_XDG', 'GIO_', 'DBUS_',
+            ];
+
+            for (const [key, value] of Object.entries(process.env)) {
+                if (value && !excludePatterns.some(pattern => key.toUpperCase().includes(pattern))) {
+                    cleanEnv[key] = value;
+                }
+            }
+
+            // Explicitly set required vars
+            cleanEnv['NODE_ENV'] = 'development';
+            cleanEnv['BROWSER'] = 'none';
+            cleanEnv['HOME'] = homeDir;
+            cleanEnv['PATH'] = process.env.PATH || '';
+
             // Start the dev server
             // On macOS/Linux, we use detached: true to create a new process group for clean killing.
             const devProcess = spawn(cmd, ['run', 'dev', '--', '-p', String(port)], {
                 cwd: expandedPath,
-                env: { ...process.env, BROWSER: 'none' },
+                env: cleanEnv as NodeJS.ProcessEnv,
                 detached: !isWin, // Only detach on Unix to enable group killing (-pid)
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
