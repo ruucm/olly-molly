@@ -87,10 +87,12 @@ export async function POST(request: Request) {
             cleanEnv['PATH'] = process.env.PATH || '';
 
             // Start the dev server
-            // On macOS/Linux, we use detached: true to create a new process group for clean killing.
+            // On macOS/Linux: use detached: true for process group killing
+            // On Windows: use shell: true for .cmd files
             const devProcess = spawn(cmd, ['run', 'dev', '--', '-p', String(port)], {
                 cwd: expandedPath,
                 env: cleanEnv as NodeJS.ProcessEnv,
+                shell: isWin, // Windows needs shell: true for .cmd files
                 detached: !isWin, // Only detach on Unix to enable group killing (-pid)
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
