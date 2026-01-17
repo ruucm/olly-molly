@@ -325,7 +325,7 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
                             DB 백업 & 복원
                         </label>
                         <p className="mt-1 text-xs text-[var(--text-muted)]">
-                            현재 IndexedDB 데이터를 JSON 파일로 저장하거나 복원합니다.
+                            현재 IndexedDB 데이터를 JSON 파일로 저장하거나 복원합니다. 자동 백업은 5분마다 서버 파일로 저장됩니다.
                         </p>
                     </div>
                     <div className="flex gap-2">

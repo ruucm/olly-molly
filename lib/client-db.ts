@@ -116,6 +116,7 @@ type StoreName = (typeof STORE_NAMES)[keyof typeof STORE_NAMES];
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
 const DB_BACKUP_VERSION = 1;
+const AUTO_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 const BACKUP_STORE_NAMES: StoreName[] = [
   STORE_NAMES.members,
   STORE_NAMES.tickets,
@@ -167,6 +168,29 @@ export async function importDbBackup(backup: DbBackup): Promise<void> {
     }),
   );
   await tx.done;
+}
+
+let autoBackupTimer: number | null = null;
+
+export function startAutoBackup(): void {
+  if (typeof window === 'undefined') return;
+  if (autoBackupTimer) return;
+
+  const run = async () => {
+    try {
+      const backup = await exportDbBackup();
+      await fetch('/api/db/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backup),
+      });
+    } catch (error) {
+      console.warn('[db] Auto backup failed', error);
+    }
+  };
+
+  void run();
+  autoBackupTimer = window.setInterval(run, AUTO_BACKUP_INTERVAL_MS);
 }
 
 function getIdb(): Promise<IDBPDatabase> {
@@ -702,6 +726,7 @@ export function initClientDb(): Promise<void> {
       );
     }
     scheduleSqliteDump();
+    startAutoBackup();
   })();
   return initPromise;
 }
