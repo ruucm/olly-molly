@@ -123,6 +123,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
     }, [provider, providerLoaded]);
     const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const outputRef = useRef<HTMLPreElement>(null);
+    const autoScrollEnabledRef = useRef(true);
 
     const isEditing = !!ticket;
 
@@ -150,8 +151,8 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                     setRunningJob(data.job);
                     setExecuting(data.job.status === 'running');
 
-                    // Auto-scroll output
-                    if (outputRef.current) {
+                    // Auto-scroll output if user hasn't scrolled away from the bottom
+                    if (outputRef.current && autoScrollEnabledRef.current) {
                         outputRef.current.scrollTop = outputRef.current.scrollHeight;
                     }
 
@@ -181,6 +182,10 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             }
         };
     }, [ticket, status, onTicketStatusChange]);
+
+    useEffect(() => {
+        autoScrollEnabledRef.current = true;
+    }, [runningJob?.id]);
 
     // Fetch work logs
     useEffect(() => {
@@ -495,6 +500,11 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                                 </div>
                                 <pre
                                     ref={outputRef}
+                                    onScroll={() => {
+                                        if (!outputRef.current) return;
+                                        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
+                                        autoScrollEnabledRef.current = scrollHeight - scrollTop - clientHeight < 8;
+                                    }}
                                     className={`text-xs text-[var(--text-tertiary)] overflow-auto whitespace-pre-wrap bg-black/30 rounded p-3 font-mono transition-all ${expandedLog ? 'max-h-[60vh]' : 'max-h-48'}`}
                                 >
                                     {stripAnsi(runningJob.output) || 'Starting...'}

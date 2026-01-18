@@ -40,8 +40,10 @@ interface ConversationViewProps {
 }
 
 export function ConversationView({ conversation, messages, isRunning = false, jobId = null, onStopJob }: ConversationViewProps) {
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [hasInitiallyScrolled, setHasInitiallyScrolled] = useState(false);
+    const autoScrollEnabledRef = useRef(true);
     const prevConversationId = useRef<string | null>(null);
 
     // Reset scroll flag when conversation changes
@@ -49,6 +51,7 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
         if (conversation?.id !== prevConversationId.current) {
             prevConversationId.current = conversation?.id || null;
             setHasInitiallyScrolled(false);
+            autoScrollEnabledRef.current = true;
         }
     }, [conversation?.id]);
 
@@ -66,9 +69,11 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
     // Scroll to bottom: once on initial load, then only when running
     useEffect(() => {
         if (!hasInitiallyScrolled && sortedMessages.length > 0) {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+            if (autoScrollEnabledRef.current) {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+            }
             setHasInitiallyScrolled(true);
-        } else if (isRunning) {
+        } else if (isRunning && autoScrollEnabledRef.current) {
             messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
     }, [sortedMessages, isRunning, hasInitiallyScrolled]);
@@ -207,7 +212,15 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            <div
+                ref={scrollContainerRef}
+                onScroll={() => {
+                    if (!scrollContainerRef.current) return;
+                    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+                    autoScrollEnabledRef.current = scrollHeight - scrollTop - clientHeight < 8;
+                }}
+                className="flex-1 overflow-y-auto p-4 space-y-2"
+            >
                 {sortedMessages.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-muted">
                         <p>No messages yet...</p>
