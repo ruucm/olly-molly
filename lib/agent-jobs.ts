@@ -384,9 +384,17 @@ export function startBackgroundJob(params: StartJobParams): void {
     // On Windows, shell: true is needed to find commands in PATH
     const isWindows = process.platform === 'win32';
 
+    // Build environment with provider-specific settings
+    const spawnEnv: NodeJS.ProcessEnv = { ...process.env, PORT: '3001' };
+
+    // For OpenCode, set permission to allow all to skip interactive prompts
+    if (provider === 'opencode') {
+        spawnEnv.OPENCODE_PERMISSION = '"allow"';
+    }
+
     const agentProcess = spawn(execPath, args, {
         cwd: projectPath,
-        env: { ...process.env, PORT: '3001' },
+        env: spawnEnv,
         shell: isWindows,
         detached: false,
         stdio: ['pipe', 'pipe', 'pipe'],
