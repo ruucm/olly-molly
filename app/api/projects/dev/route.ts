@@ -72,6 +72,7 @@ export async function POST(request: Request) {
                 'ELECTRON', 'CHROME', 'NODE_OPTIONS',
                 '__NEXT', 'NEXT_', '__CFBundle',
                 'ORIGINAL_XDG', 'GIO_', 'DBUS_',
+                'TURBOPACK',
             ];
 
             for (const [key, value] of Object.entries(process.env)) {
