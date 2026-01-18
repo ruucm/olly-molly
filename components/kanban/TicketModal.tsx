@@ -105,6 +105,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
     const [runningJob, setRunningJob] = useState<RunningJob | null>(null);
     const [feedback, setFeedback] = useState('');
     const [provider, setProvider] = useState<AgentProvider>('opencode');
+    const [providerLoaded, setProviderLoaded] = useState(false);
     const [expandedLog, setExpandedLog] = useState(false);
 
     useEffect(() => {
@@ -113,12 +114,13 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
         if (savedProvider === 'claude' || savedProvider === 'opencode' || savedProvider === 'codex') {
             setProvider(savedProvider);
         }
+        setProviderLoaded(true);
     }, []);
 
     useEffect(() => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || !providerLoaded) return;
         window.localStorage.setItem('agentProvider', provider);
-    }, [provider]);
+    }, [provider, providerLoaded]);
     const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const outputRef = useRef<HTMLPreElement>(null);
 

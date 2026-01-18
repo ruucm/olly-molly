@@ -122,6 +122,7 @@ export function TicketSidebar({
     const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
     const [feedback, setFeedback] = useState('');
     const [provider, setProvider] = useState<AgentProvider>('opencode');
+    const [providerLoaded, setProviderLoaded] = useState(false);
     const [executing, setExecuting] = useState(false);
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
@@ -140,12 +141,13 @@ export function TicketSidebar({
         if (savedProvider === 'claude' || savedProvider === 'opencode' || savedProvider === 'codex') {
             setProvider(savedProvider);
         }
+        setProviderLoaded(true);
     }, []);
 
     useEffect(() => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || !providerLoaded) return;
         window.localStorage.setItem('agentProvider', provider);
-    }, [provider]);
+    }, [provider, providerLoaded]);
 
     // Update form fields when ticket changes
     useEffect(() => {
