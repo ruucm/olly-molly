@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Modal } from '@/components/ui/Modal';
@@ -120,51 +120,77 @@ function resolveRelativePath(basePath: string, relativePath: string): string {
     return nextSegments.join('/');
 }
 
-function MarkdownViewer({
-    content,
+interface MarkdownImageProps {
+    src: string;
+    alt: string;
+    projectId: string;
+    projectPath?: string | null;
+    filePath: string;
+}
+
+const MarkdownImage = memo(function MarkdownImage({
+    src,
+    alt,
     projectId,
     projectPath,
     filePath,
-}: {
+}: MarkdownImageProps) {
+    if (!src) return null;
+    const resolved = resolveRelativePath(filePath, src);
+    const projectPathParam = projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : '';
+    const imageSrc = resolved.startsWith('http') || resolved.startsWith('data:')
+        ? resolved
+        : `/api/projects/files/raw?projectId=${projectId}${projectPathParam}&path=${encodeURIComponent(resolved)}`;
+    return (
+        <img
+            src={imageSrc}
+            alt={alt}
+            loading="lazy"
+        />
+    );
+});
+
+interface MarkdownViewerProps {
     content: string;
     projectId: string;
     projectPath?: string | null;
     filePath: string;
-}) {
+}
+
+const MarkdownViewer = memo(function MarkdownViewer({
+    content,
+    projectId,
+    projectPath,
+    filePath,
+}: MarkdownViewerProps) {
+    const components = useMemo(() => ({
+        img: ({ src = '', alt = '' }: { src?: string; alt?: string }) => (
+            <MarkdownImage
+                src={src}
+                alt={alt || ''}
+                projectId={projectId}
+                projectPath={projectPath}
+                filePath={filePath}
+            />
+        ),
+        a: ({ href = '', children }: { href?: string; children?: React.ReactNode }) => (
+            <a href={href} target="_blank" rel="noreferrer">
+                {children}
+            </a>
+        ),
+    }), [projectId, projectPath, filePath]);
+
     return (
         <div className="markdown-viewer max-w-4xl mx-auto">
             <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                components={{
-                    img: ({ src = '', alt = '' }) => {
-                        if (typeof src !== 'string' || src.length === 0) {
-                            return null;
-                        }
-                        const resolved = resolveRelativePath(filePath, src);
-                        const projectPathParam = projectPath ? `&projectPath=${encodeURIComponent(projectPath)}` : '';
-                        const imageSrc = resolved.startsWith('http') || resolved.startsWith('data:')
-                            ? resolved
-                            : `/api/projects/files/raw?projectId=${projectId}${projectPathParam}&path=${encodeURIComponent(resolved)}`;
-                        return (
-                            <img
-                                src={imageSrc}
-                                alt={alt}
-                                loading="lazy"
-                            />
-                        );
-                    },
-                    a: ({ href = '', children }) => (
-                        <a href={href} target="_blank" rel="noreferrer">
-                            {children}
-                        </a>
-                    ),
-                }}
+                components={components}
             >
                 {content}
             </ReactMarkdown>
         </div>
     );
-}
+});
 
 export function ProjectArtifactsModal({
     isOpen,
