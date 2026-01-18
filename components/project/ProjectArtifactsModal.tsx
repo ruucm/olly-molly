@@ -164,18 +164,22 @@ const MarkdownViewer = memo(function MarkdownViewer({
     filePath,
 }: MarkdownViewerProps) {
     const components = useMemo(() => ({
-        img: ({ src = '', alt = '' }: { src?: string; alt?: string }) => (
-            <MarkdownImage
-                src={src}
-                alt={alt || ''}
-                projectId={projectId}
-                projectPath={projectPath}
-                filePath={filePath}
-            />
-        ),
-        a: ({ href = '', children }: { href?: string; children?: React.ReactNode }) => (
-            <a href={href} target="_blank" rel="noreferrer">
-                {children}
+        img: (props: React.ComponentPropsWithoutRef<'img'>) => {
+            const src = typeof props.src === 'string' ? props.src : '';
+            const alt = props.alt || '';
+            return (
+                <MarkdownImage
+                    src={src}
+                    alt={alt}
+                    projectId={projectId}
+                    projectPath={projectPath}
+                    filePath={filePath}
+                />
+            );
+        },
+        a: (props: React.ComponentPropsWithoutRef<'a'>) => (
+            <a href={props.href} target="_blank" rel="noreferrer">
+                {props.children}
             </a>
         ),
     }), [projectId, projectPath, filePath]);
