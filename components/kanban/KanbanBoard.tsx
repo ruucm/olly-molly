@@ -149,22 +149,28 @@ export function KanbanBoard({
             return;
         }
 
-        // Check if reordering within the same column
         const draggedTicket = tickets.find(t => t.id === ticketId);
         const overTicket = tickets.find(t => t.id === overId);
 
-        if (draggedTicket && overTicket && draggedTicket.status === overTicket.status) {
-            const columnTickets = tickets.filter(t => t.status === draggedTicket.status);
-            const otherTickets = tickets.filter(t => t.status !== draggedTicket.status);
+        if (!draggedTicket || !overTicket) return;
 
-            const oldIndex = columnTickets.findIndex(t => t.id === ticketId);
-            const newIndex = columnTickets.findIndex(t => t.id === overId);
+        // Moving to a different column (dropped on a ticket in another column)
+        if (draggedTicket.status !== overTicket.status) {
+            onTicketUpdate(ticketId, { status: overTicket.status });
+            return;
+        }
 
-            if (oldIndex !== newIndex) {
-                const reorderedColumnTickets = arrayMove(columnTickets, oldIndex, newIndex);
-                const newTickets = [...otherTickets, ...reorderedColumnTickets];
-                onTicketsReorder?.(newTickets);
-            }
+        // Reordering within the same column
+        const columnTickets = tickets.filter(t => t.status === draggedTicket.status);
+        const otherTickets = tickets.filter(t => t.status !== draggedTicket.status);
+
+        const oldIndex = columnTickets.findIndex(t => t.id === ticketId);
+        const newIndex = columnTickets.findIndex(t => t.id === overId);
+
+        if (oldIndex !== newIndex) {
+            const reorderedColumnTickets = arrayMove(columnTickets, oldIndex, newIndex);
+            const newTickets = [...otherTickets, ...reorderedColumnTickets];
+            onTicketsReorder?.(newTickets);
         }
     };
 
