@@ -161,6 +161,8 @@ export function TicketSidebar({
             // Reset executing state and conversation selection when switching tickets
             setExecuting(false);
             setSelectedConversationId(null);
+            setCurrentJobId(null);
+            lastOutputRef.current = '';
         }
     }, [ticket?.id]);
 
