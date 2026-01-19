@@ -18,13 +18,21 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
   const logContainerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
+  // Reset selected conversation when ticket changes
+  useEffect(() => {
+    setSelectedConversationId(null);
+  }, [ticket.id]);
+
   // Select the most recent conversation by default
   useEffect(() => {
-    if (conversations.length > 0 && !selectedConversationId) {
+    if (conversations.length > 0) {
       const sorted = [...conversations].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
-      setSelectedConversationId(sorted[0].id);
+      // Always select the most recent conversation
+      if (!selectedConversationId || !conversations.find(c => c.id === selectedConversationId)) {
+        setSelectedConversationId(sorted[0].id);
+      }
     }
   }, [conversations, selectedConversationId]);
 
