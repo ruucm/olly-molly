@@ -31,29 +31,26 @@ const defaultPrompts: Record<string, string> = {
 };
 
 export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps) {
-    const [role, setRole] = useState('');
     const [name, setName] = useState('');
     const [avatar, setAvatar] = useState('');
     const [systemPrompt, setSystemPrompt] = useState('');
     const [canGenerateImages, setCanGenerateImages] = useState(false);
     const [canLogScreenshots, setCanLogScreenshots] = useState(false);
 
-    const handleRoleSelect = (selectedRole: string, emoji: string, prompt: string, roleValue?: string) => {
-        setRole(selectedRole);
+    const handleTemplateSelect = (emoji: string, prompt: string, roleValue: string) => {
         setSystemPrompt(prompt);
         if (!avatar) {
             setAvatar(emoji);
         }
-        const resolvedRole = roleValue ?? selectedRole;
-        // Auto-enable for FE_DEV and BUG_HUNTER based on previous logic, but allow toggle
-        setCanGenerateImages(resolvedRole === 'FE_DEV' || resolvedRole === 'BUG_HUNTER');
-        setCanLogScreenshots(resolvedRole === 'FE_DEV' || resolvedRole === 'QA');
+        // Auto-enable capabilities based on role template
+        setCanGenerateImages(roleValue === 'FE_DEV' || roleValue === 'BUG_HUNTER');
+        setCanLogScreenshots(roleValue === 'FE_DEV' || roleValue === 'QA');
     };
 
     const handleSave = () => {
-        if (role.trim() && name.trim() && systemPrompt.trim()) {
+        if (name.trim() && systemPrompt.trim()) {
             onSave({
-                role: role.trim(),
+                role: name.trim(), // Use name as role
                 name: name.trim(),
                 avatar: avatar.trim() || '👤',
                 system_prompt: systemPrompt.trim(),
@@ -61,7 +58,6 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
                 can_log_screenshots: canLogScreenshots
             });
             // Reset form
-            setRole('');
             setName('');
             setAvatar('');
             setSystemPrompt('');
@@ -73,7 +69,6 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
 
     const handleClose = () => {
         // Reset form on close
-        setRole('');
         setName('');
         setAvatar('');
         setSystemPrompt('');
@@ -85,34 +80,6 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
     return (
         <Modal isOpen={isOpen} onClose={handleClose} title="Add Team Member" size="xl">
             <div className="space-y-4">
-                {/* Role Input */}
-                <div>
-                    <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
-                        Role *
-                    </label>
-                    <Input
-                        value={role}
-                        onChange={(e) => setRole(e.target.value)}
-                        placeholder="e.g., Frontend Specialist, Data Analyst, Designer"
-                    />
-                    <p className="text-xs text-[var(--text-tertiary)] mt-1">
-                        Suggested roles (click to use):
-                    </p>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                        {roleOptions.map((option) => (
-                            <button
-                                key={option.value}
-                                type="button"
-                                onClick={() => handleRoleSelect(option.label, option.emoji, defaultPrompts[option.value], option.value)}
-                                className="px-2 py-1 text-xs rounded-md bg-[var(--bg-tertiary)] hover:bg-[var(--bg-card-hover)] 
-                                         border border-[var(--border-primary)] transition-colors"
-                            >
-                                {option.emoji} {option.label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
                 {/* Name Input */}
                 <Input
                     label="Name *"
@@ -163,13 +130,30 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
                 </div>
 
                 {/* System Prompt */}
-                <Textarea
-                    label="System Prompt *"
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    rows={10}
-                    placeholder="Enter the system prompt for this AI agent..."
-                />
+                <div>
+                    <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
+                        System Prompt *
+                    </label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                        {roleOptions.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => handleTemplateSelect(option.emoji, defaultPrompts[option.value], option.value)}
+                                className="px-2 py-1 text-xs rounded-md bg-[var(--bg-tertiary)] hover:bg-[var(--bg-card-hover)]
+                                         border border-[var(--border-primary)] transition-colors"
+                            >
+                                {option.emoji} {option.label}
+                            </button>
+                        ))}
+                    </div>
+                    <Textarea
+                        value={systemPrompt}
+                        onChange={(e) => setSystemPrompt(e.target.value)}
+                        rows={10}
+                        placeholder="Enter the system prompt for this AI agent..."
+                    />
+                </div>
 
                 {/* Action Buttons */}
                 <div className="flex justify-end gap-3 pt-2">
@@ -177,7 +161,7 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
                     <Button
                         variant="primary"
                         onClick={handleSave}
-                        disabled={!role.trim() || !name.trim() || !systemPrompt.trim()}
+                        disabled={!name.trim() || !systemPrompt.trim()}
                     >
                         Create Member
                     </Button>
