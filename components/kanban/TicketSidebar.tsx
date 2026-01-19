@@ -121,7 +121,7 @@ export function TicketSidebar({
     const [priority, setPriority] = useState('MEDIUM');
     const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
     const [feedback, setFeedback] = useState('');
-    const [provider, setProvider] = useState<AgentProvider>('opencode');
+    const [provider, setProvider] = useState<AgentProvider>('claude');
     const [providerLoaded, setProviderLoaded] = useState(false);
     const [executing, setExecuting] = useState(false);
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);

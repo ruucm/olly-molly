@@ -104,7 +104,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
     const [executing, setExecuting] = useState(false);
     const [runningJob, setRunningJob] = useState<RunningJob | null>(null);
     const [feedback, setFeedback] = useState('');
-    const [provider, setProvider] = useState<AgentProvider>('opencode');
+    const [provider, setProvider] = useState<AgentProvider>('claude');
     const [providerLoaded, setProviderLoaded] = useState(false);
     const [expandedLog, setExpandedLog] = useState(false);
 

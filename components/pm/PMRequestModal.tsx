@@ -36,7 +36,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
     const [question, setQuestion] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [provider, setProvider] = useState<AgentProvider>('opencode');
+    const [provider, setProvider] = useState<AgentProvider>('claude');
     const [providerLoaded, setProviderLoaded] = useState(false);
     const [result, setResult] = useState<{
         message: string;
