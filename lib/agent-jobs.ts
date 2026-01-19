@@ -449,6 +449,7 @@ export function startBackgroundJob(params: StartJobParams): void {
     let lastFlushTime = Date.now();
     let hasStreamedText = false;
     let claudeResultReceived = false; // Track if we received a result from Claude
+    let claudeResultIsError = false; // Track is_error field from Claude result
 
     const flushStreamedText = (force = false) => {
         if (!streamedTextBuffer) return;
@@ -478,6 +479,7 @@ export function startBackgroundJob(params: StartJobParams): void {
 
             if (parsed?.type === 'result') {
                 claudeResultReceived = true; // Claude finished and sent result
+                claudeResultIsError = parsed.is_error === true; // Track if Claude reported an error
                 if (typeof parsed.result === 'string' && !hasStreamedText) {
                     streamedTextBuffer += parsed.result;
                     hasStreamedText = true;
@@ -526,7 +528,7 @@ export function startBackgroundJob(params: StartJobParams): void {
         }
 
         // Log exit code for debugging
-        console.log(`[agent-jobs] Process exited with code: ${code}, provider: ${provider}, claudeResultReceived: ${isClaudeStream ? claudeResultReceived : 'N/A'}`);
+        console.log(`[agent-jobs] Process exited with code: ${code}, provider: ${provider}, claudeResultReceived: ${isClaudeStream ? claudeResultReceived : 'N/A'}, claudeResultIsError: ${isClaudeStream ? claudeResultIsError : 'N/A'}`);
 
         // Extract commit hash from output
         const commitMatch = job.output.match(/commit\s+([a-f0-9]{7,40})/i);
@@ -536,8 +538,8 @@ export function startBackgroundJob(params: StartJobParams): void {
         // 1. Exit code 0 (normal success)
         // 2. Has a commit hash (work was committed)
         // 3. Output contains success indicators
-        // 4. For Claude: received a result message (claude sends result even with non-zero exit)
-        const hasSuccessIndicators = 
+        // 4. For Claude: received a result message with is_error: false
+        const hasSuccessIndicators =
             job.output.includes('commit') ||
             job.output.includes('committed') ||
             job.output.includes('completed') ||
@@ -550,32 +552,33 @@ export function startBackgroundJob(params: StartJobParams): void {
             job.output.includes('✅') ||
             /files?\s+(created|modified|updated|changed)/i.test(job.output);
 
-        // Check for explicit failure indicators
-        const hasFailureIndicators = 
-            job.output.includes('Error:') ||
-            job.output.includes('fatal:') ||
+        // Check for explicit failure indicators (only check stderr lines to avoid false positives from code output)
+        // Look for failure patterns that are likely actual errors, not code being written
+        const hasFailureIndicators =
+            job.output.includes('[stderr] fatal:') ||
+            job.output.includes('[stderr] Error:') ||
+            job.output.includes('[error]') ||
             job.output.includes('FAILED') ||
-            job.output.includes('❌ Task failed') ||
-            /error\s*occurred/i.test(job.output);
+            job.output.includes('❌ Task failed');
 
         // For Claude with stream-json, success if:
-        // - Exit code 0, OR
-        // - We received a result message and no explicit failure, OR
-        // - We have success indicators and no failure indicators
+        // - We received a result message with is_error: false (most reliable)
+        // - OR exit code 0
+        // - OR we have success indicators and no clear failure indicators
         const claudeSuccess = isClaudeStream && (
-            claudeResultReceived && !hasFailureIndicators ||
+            (claudeResultReceived && !claudeResultIsError) ||
             hasStreamedText && hasSuccessIndicators && !hasFailureIndicators
         );
 
-        const success = code === 0 || 
-            commitHash !== undefined || 
+        const success = code === 0 ||
+            commitHash !== undefined ||
             claudeSuccess ||
             (code === null && hasSuccessIndicators && !hasFailureIndicators) ||
             (hasSuccessIndicators && !hasFailureIndicators && job.output.length > 500);
-            
+
         job.status = success ? 'completed' : 'failed';
 
-        console.log(`[agent-jobs] Task marked as: ${job.status} (code: ${code}, commitHash: ${commitHash}, successIndicators: ${hasSuccessIndicators}, failureIndicators: ${hasFailureIndicators}, claudeSuccess: ${claudeSuccess})`);
+        console.log(`[agent-jobs] Task marked as: ${job.status} (code: ${code}, commitHash: ${commitHash}, successIndicators: ${hasSuccessIndicators}, failureIndicators: ${hasFailureIndicators}, claudeSuccess: ${claudeSuccess}, claudeResultIsError: ${claudeResultIsError})`);
 
         // Append to work log file in project directory
         appendToWorkLog(job.projectPath, {
