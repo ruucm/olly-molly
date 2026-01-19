@@ -7,10 +7,11 @@ import { TeamPanel } from '@/components/team';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { PMRequestModal } from '@/components/pm';
 import { ProjectSelector, ProjectArtifactsModal, DevServerControl } from '@/components/project';
+import { WorkflowCanvas } from '@/components/workflow';
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import { Icon } from '@/components/ui';
-import { PanelRightClose, PanelRightOpen, Settings, CheckSquare, Square } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Settings, CheckSquare, Square, LayoutDashboard, GitBranch } from 'lucide-react';
 import packageJson from '@/package.json';
 import {
   initClientDb,
@@ -56,6 +57,8 @@ type BoardTicket = Omit<UiTicket, 'assignees'> & {
   assignees: BoardMember[];  // Multi-assignee support
 };
 
+type ViewMode = 'kanban' | 'workflow';
+
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -68,6 +71,9 @@ export default function Dashboard() {
   const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
+
+  // View mode state
+  const [activeView, setActiveView] = useState<ViewMode>('kanban');
 
   // Multi-selection state
   const [selectionMode, setSelectionMode] = useState(false);
@@ -337,6 +343,36 @@ export default function Dashboard() {
                 {runningCount} working
               </span>
             )}
+
+            {/* View Mode Tabs */}
+            <div className="flex items-center gap-1 ml-4 bg-[var(--bg-secondary)] rounded-lg p-0.5">
+              <button
+                onClick={() => setActiveView('kanban')}
+                className={`
+                  flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors
+                  ${activeView === 'kanban'
+                    ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  }
+                `}
+              >
+                <Icon icon={LayoutDashboard} />
+                Kanban
+              </button>
+              <button
+                onClick={() => setActiveView('workflow')}
+                className={`
+                  flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors
+                  ${activeView === 'workflow'
+                    ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  }
+                `}
+              >
+                <Icon icon={GitBranch} />
+                Workflow
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <ProjectSelector onProjectChange={handleProjectChange} />
@@ -424,53 +460,77 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <div className="flex h-[calc(100vh-45px)]">
-        <ResizablePane
-          defaultLeftWidth={ticketSidebarOpen ? 55 : 100}
-          minLeftWidth={30}
-          minRightWidth={25}
-          left={
-            <div className="h-full overflow-auto">
-              <KanbanBoard
-                tickets={tickets}
+        {activeView === 'kanban' ? (
+          <ResizablePane
+            defaultLeftWidth={ticketSidebarOpen ? 55 : 100}
+            minLeftWidth={30}
+            minRightWidth={25}
+            left={
+              <div className="h-full overflow-auto">
+                <KanbanBoard
+                  tickets={tickets}
+                  members={members}
+                  onTicketCreate={handleTicketCreate}
+                  onTicketUpdate={handleTicketUpdate}
+                  onTicketDelete={handleTicketDelete}
+                  onTicketsReorder={handleTicketsReorder}
+                  hasActiveProject={!!activeProject}
+                  onRefresh={handleRefresh}
+                  onTicketSelect={(ticket) => {
+                    const fullTicket = tickets.find((item) => item.id === ticket.id) || ticket;
+                    setSelectedTicket(fullTicket as BoardTicket);
+                    setTicketSidebarOpen(true);
+                  }}
+                  selectionMode={selectionMode}
+                  selectedTicketIds={selectedTicketIds}
+                  onTicketCheck={handleTicketCheck}
+                />
+              </div>
+            }
+            right={
+              ticketSidebarOpen && selectedTicket ? (
+                <TicketSidebar
+                  isOpen={ticketSidebarOpen}
+                  onClose={() => {
+                    setTicketSidebarOpen(false);
+                    setSelectedTicket(null);
+                  }}
+                  ticket={selectedTicket}
+                  members={members}
+                  onTicketUpdate={handleTicketUpdate}
+                  onTicketDelete={handleTicketDelete}
+                  hasActiveProject={!!activeProject}
+                />
+              ) : (
+                <div className="h-full bg-secondary border-l border-primary flex items-center justify-center text-muted">
+                  <p>Select a ticket to view details</p>
+                </div>
+              )
+            }
+          />
+        ) : (
+          <div className="flex-1">
+            {activeProject ? (
+              <WorkflowCanvas
+                projectId={activeProject.id}
+                tickets={allTickets.filter((t) => t.project_id === activeProject.id)}
                 members={members}
-                onTicketCreate={handleTicketCreate}
-                onTicketUpdate={handleTicketUpdate}
-                onTicketDelete={handleTicketDelete}
-                onTicketsReorder={handleTicketsReorder}
-                hasActiveProject={!!activeProject}
-                onRefresh={handleRefresh}
-                onTicketSelect={(ticket) => {
-                  const fullTicket = tickets.find((item) => item.id === ticket.id) || ticket;
-                  setSelectedTicket(fullTicket as BoardTicket);
-                  setTicketSidebarOpen(true);
-                }}
-                selectionMode={selectionMode}
-                selectedTicketIds={selectedTicketIds}
-                onTicketCheck={handleTicketCheck}
-              />
-            </div>
-          }
-          right={
-            ticketSidebarOpen && selectedTicket ? (
-              <TicketSidebar
-                isOpen={ticketSidebarOpen}
-                onClose={() => {
-                  setTicketSidebarOpen(false);
-                  setSelectedTicket(null);
-                }}
-                ticket={selectedTicket}
-                members={members}
-                onTicketUpdate={handleTicketUpdate}
-                onTicketDelete={handleTicketDelete}
-                hasActiveProject={!!activeProject}
+                defaultAgentId={members.find((m) => m.role === 'FE_DEV')?.id || members[0]?.id || ''}
               />
             ) : (
-              <div className="h-full bg-secondary border-l border-primary flex items-center justify-center text-muted">
-                <p>Select a ticket to view details</p>
+              <div className="flex items-center justify-center h-full bg-[var(--bg-primary)]">
+                <div className="text-center">
+                  <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">
+                    Select a Project
+                  </h3>
+                  <p className="text-sm text-[var(--text-muted)]">
+                    Choose a project to view or create workflows
+                  </p>
+                </div>
               </div>
-            )
-          }
-        />
+            )}
+          </div>
+        )}
 
         {/* Team Sidebar */}
         <aside className={`

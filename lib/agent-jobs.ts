@@ -393,7 +393,7 @@ export function startBackgroundJob(params: StartJobParams): void {
         'TURBOPACK',
     ];
 
-    const spawnEnv: NodeJS.ProcessEnv = {};
+    const spawnEnv: Record<string, string | undefined> = {};
     for (const [key, value] of Object.entries(process.env)) {
         if (value && !excludePatterns.some(pattern => key.toUpperCase().includes(pattern))) {
             spawnEnv[key] = value;
@@ -411,7 +411,7 @@ export function startBackgroundJob(params: StartJobParams): void {
 
     const agentProcess = spawn(execPath, args, {
         cwd: projectPath,
-        env: spawnEnv,
+        env: spawnEnv as NodeJS.ProcessEnv,
         shell: isWindows,
         detached: !isWindows, // Detach on Unix to prevent parent termination
         stdio: ['pipe', 'pipe', 'pipe'],

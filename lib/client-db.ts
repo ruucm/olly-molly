@@ -96,8 +96,36 @@ export interface ConversationMessage {
   created_at: string;
 }
 
+export interface Workflow {
+  id: string;
+  name: string;
+  description: string | null;
+  project_id: string;
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'paused';
+  current_node_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowNode {
+  id: string;
+  workflow_id: string;
+  ticket_id: string;
+  position_x: number;
+  position_y: number;
+  created_at: string;
+}
+
+export interface WorkflowEdge {
+  id: string;
+  workflow_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  created_at: string;
+}
+
 const DB_NAME = 'olly-molly';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORE_NAMES = {
   members: 'members',
@@ -107,6 +135,9 @@ const STORE_NAMES = {
   agentWorkLogs: 'agent_work_logs',
   conversations: 'conversations',
   conversationMessages: 'conversation_messages',
+  workflows: 'workflows',
+  workflowNodes: 'workflow_nodes',
+  workflowEdges: 'workflow_edges',
   sqliteDump: 'sqlite_dump',
   meta: 'meta',
 } as const;
@@ -125,6 +156,9 @@ const BACKUP_STORE_NAMES: StoreName[] = [
   STORE_NAMES.agentWorkLogs,
   STORE_NAMES.conversations,
   STORE_NAMES.conversationMessages,
+  STORE_NAMES.workflows,
+  STORE_NAMES.workflowNodes,
+  STORE_NAMES.workflowEdges,
   STORE_NAMES.meta,
 ];
 
@@ -220,6 +254,15 @@ function getIdb(): Promise<IDBPDatabase> {
         }
         if (!db.objectStoreNames.contains(STORE_NAMES.conversationMessages)) {
           db.createObjectStore(STORE_NAMES.conversationMessages, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.workflows)) {
+          db.createObjectStore(STORE_NAMES.workflows, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.workflowNodes)) {
+          db.createObjectStore(STORE_NAMES.workflowNodes, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.workflowEdges)) {
+          db.createObjectStore(STORE_NAMES.workflowEdges, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(STORE_NAMES.sqliteDump)) {
           db.createObjectStore(STORE_NAMES.sqliteDump, { keyPath: 'id' });
@@ -591,6 +634,9 @@ const conversationMessagesCollection = createIndexedDbCollectionWithOptions<Conv
   STORE_NAMES.conversationMessages,
   { scheduleSqliteDump: false },
 );
+const workflowsCollection = createIndexedDbCollection<Workflow>(STORE_NAMES.workflows);
+const workflowNodesCollection = createIndexedDbCollection<WorkflowNode>(STORE_NAMES.workflowNodes);
+const workflowEdgesCollection = createIndexedDbCollection<WorkflowEdge>(STORE_NAMES.workflowEdges);
 
 const DEFAULT_MEMBERS: Array<Omit<Member, 'created_at' | 'updated_at'>> = [
   {
@@ -1071,6 +1117,138 @@ export const agentWorkLogService = {
   },
 };
 
+export function useWorkflows(projectId?: string) {
+  const { data } = useLiveQuery(() => workflowsCollection);
+  const workflows = (data ?? []) as Workflow[];
+  if (projectId) {
+    return workflows.filter((w) => w.project_id === projectId);
+  }
+  return workflows;
+}
+
+export function useWorkflowNodes(workflowId: string) {
+  const { data } = useLiveQuery((q) =>
+    q.from({ nodes: workflowNodesCollection }).where(({ nodes }) => eq(nodes.workflow_id, workflowId)),
+    [workflowId],
+  );
+  return (data ?? []) as WorkflowNode[];
+}
+
+export function useWorkflowEdges(workflowId: string) {
+  const { data } = useLiveQuery((q) =>
+    q.from({ edges: workflowEdgesCollection }).where(({ edges }) => eq(edges.workflow_id, workflowId)),
+    [workflowId],
+  );
+  return (data ?? []) as WorkflowEdge[];
+}
+
+export const workflowService = {
+  getAll(projectId?: string): Workflow[] {
+    const workflows = Array.from(workflowsCollection.values());
+    if (projectId) {
+      return workflows.filter((w) => w.project_id === projectId);
+    }
+    return workflows;
+  },
+  getById(id: string): Workflow | undefined {
+    return workflowsCollection.get(id);
+  },
+  create(data: { name: string; description?: string; project_id: string }): Workflow {
+    const now = new Date().toISOString();
+    const workflow: Workflow = {
+      id: uuidv4(),
+      name: data.name,
+      description: data.description || null,
+      project_id: data.project_id,
+      status: 'idle',
+      current_node_id: null,
+      created_at: now,
+      updated_at: now,
+    };
+    workflowsCollection.insert(workflow);
+    return workflow;
+  },
+  update(id: string, data: Partial<Pick<Workflow, 'name' | 'description' | 'status' | 'current_node_id'>>): Workflow | undefined {
+    workflowsCollection.update(id, (draft) => {
+      if (data.name !== undefined) draft.name = data.name;
+      if (data.description !== undefined) draft.description = data.description;
+      if (data.status !== undefined) draft.status = data.status;
+      if (data.current_node_id !== undefined) draft.current_node_id = data.current_node_id;
+      draft.updated_at = new Date().toISOString();
+    });
+    return this.getById(id);
+  },
+  delete(id: string): boolean {
+    // Delete all nodes and edges first
+    const nodes = Array.from(workflowNodesCollection.values()).filter((n) => n.workflow_id === id);
+    const edges = Array.from(workflowEdgesCollection.values()).filter((e) => e.workflow_id === id);
+    nodes.forEach((node) => workflowNodesCollection.delete(node.id));
+    edges.forEach((edge) => workflowEdgesCollection.delete(edge.id));
+    workflowsCollection.delete(id);
+    return true;
+  },
+};
+
+export const workflowNodeService = {
+  getByWorkflowId(workflowId: string): WorkflowNode[] {
+    return Array.from(workflowNodesCollection.values()).filter((node) => node.workflow_id === workflowId);
+  },
+  getById(id: string): WorkflowNode | undefined {
+    return workflowNodesCollection.get(id);
+  },
+  create(data: { workflow_id: string; ticket_id: string; position_x: number; position_y: number }): WorkflowNode {
+    const node: WorkflowNode = {
+      id: uuidv4(),
+      workflow_id: data.workflow_id,
+      ticket_id: data.ticket_id,
+      position_x: data.position_x,
+      position_y: data.position_y,
+      created_at: new Date().toISOString(),
+    };
+    workflowNodesCollection.insert(node);
+    return node;
+  },
+  updatePosition(id: string, position_x: number, position_y: number): void {
+    workflowNodesCollection.update(id, (draft) => {
+      draft.position_x = position_x;
+      draft.position_y = position_y;
+    });
+  },
+  delete(id: string): boolean {
+    // Delete related edges
+    const edges = Array.from(workflowEdgesCollection.values()).filter(
+      (e) => e.source_node_id === id || e.target_node_id === id
+    );
+    edges.forEach((edge) => workflowEdgesCollection.delete(edge.id));
+    workflowNodesCollection.delete(id);
+    return true;
+  },
+};
+
+export const workflowEdgeService = {
+  getByWorkflowId(workflowId: string): WorkflowEdge[] {
+    return Array.from(workflowEdgesCollection.values()).filter((edge) => edge.workflow_id === workflowId);
+  },
+  getById(id: string): WorkflowEdge | undefined {
+    return workflowEdgesCollection.get(id);
+  },
+  create(data: { workflow_id: string; source_node_id: string; target_node_id: string }): WorkflowEdge {
+    const edge: WorkflowEdge = {
+      id: uuidv4(),
+      workflow_id: data.workflow_id,
+      source_node_id: data.source_node_id,
+      target_node_id: data.target_node_id,
+      created_at: new Date().toISOString(),
+    };
+    workflowEdgesCollection.insert(edge);
+    return edge;
+  },
+  delete(id: string): boolean {
+    workflowEdgesCollection.delete(id);
+    return true;
+  },
+};
+
 export const collections = {
   membersCollection,
   ticketsCollection,
@@ -1079,4 +1257,7 @@ export const collections = {
   agentWorkLogsCollection,
   conversationsCollection,
   conversationMessagesCollection,
+  workflowsCollection,
+  workflowNodesCollection,
+  workflowEdgesCollection,
 };
