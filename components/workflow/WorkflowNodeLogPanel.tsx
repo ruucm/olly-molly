@@ -69,7 +69,7 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
   };
 
   return (
-    <div className="w-96 h-full flex flex-col border-l border-[var(--border-primary)] bg-[var(--bg-secondary)]">
+    <div className="w-96 h-full flex flex-col border-l border-[var(--border-primary)] bg-[var(--bg-secondary)] overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-primary)]">
         <div className="flex-1 min-w-0">
@@ -145,7 +145,7 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
       {/* Log Messages */}
       <div
         ref={logContainerRef}
-        className="flex-1 overflow-y-auto p-3 font-mono text-xs"
+        className="flex-1 min-h-0 overflow-y-auto p-3 font-mono text-xs"
         onScroll={(e) => {
           const target = e.target as HTMLDivElement;
           const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 50;

@@ -333,7 +333,7 @@ export function WorkflowCanvas({
             />
 
             {/* Canvas */}
-            <div className="flex-1 flex">
+            <div className="flex-1 flex overflow-hidden">
               <div
                 ref={reactFlowWrapper}
                 className="flex-1"
