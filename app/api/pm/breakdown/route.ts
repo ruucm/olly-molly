@@ -43,7 +43,9 @@ IMPORTANT RULES:
 - Only create BACKEND_DEV tasks if APIs, data storage, auth, or server logic are truly needed
 - Only add QA/DEVOPS tasks when they are clearly necessary
 - Use Korean for titles and descriptions
-- AVOID creating duplicate tasks that already exist on the board`;
+- AVOID creating duplicate tasks that already exist on the board
+- ORDER tasks by execution sequence (tasks that must be done first should come first)
+- PREFIX each task title with a sequence number (e.g., "1. 로그인 화면 UI 구현", "2. 백엔드 API 연동")`;
 
     if (existingTickets && existingTickets.length > 0) {
         prompt += `\n\n## EXISTING TICKETS ON THE BOARD\nThe following tickets already exist. Avoid creating duplicate or overlapping tasks:\n`;
@@ -56,10 +58,16 @@ IMPORTANT RULES:
 {
   "tasks": [
     {
-      "title": "Task title in Korean",
+      "title": "1. 백엔드 API 설계 및 구현",
       "description": "Detailed task description in Korean",
       "priority": "HIGH",
       "assignee_role": "BACKEND_DEV"
+    },
+    {
+      "title": "2. 프론트엔드 UI 구현",
+      "description": "Detailed task description in Korean",
+      "priority": "HIGH",
+      "assignee_role": "FE_DEV"
     }
   ],
   "summary": "Brief summary of the breakdown in Korean"
