@@ -384,8 +384,25 @@ export function startBackgroundJob(params: StartJobParams): void {
     // On Windows, shell: true is needed to find commands in PATH
     const isWindows = process.platform === 'win32';
 
-    // Build environment with provider-specific settings
-    const spawnEnv: NodeJS.ProcessEnv = { ...process.env, PORT: '3001' };
+    // Build a clean environment to prevent conflicts with parent app
+    // Filter out Next.js, Turbopack, and other app-specific vars
+    const excludePatterns = [
+        'ELECTRON', 'CHROME', 'NODE_OPTIONS',
+        '__NEXT', 'NEXT_', '__CFBundle',
+        'ORIGINAL_XDG', 'GIO_', 'DBUS_',
+        'TURBOPACK',
+    ];
+
+    const spawnEnv: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+        if (value && !excludePatterns.some(pattern => key.toUpperCase().includes(pattern))) {
+            spawnEnv[key] = value;
+        }
+    }
+
+    // Set required vars
+    spawnEnv.PORT = '3001';
+    spawnEnv.NODE_ENV = 'development';
 
     // For OpenCode, set permission to allow all to skip interactive prompts
     if (provider === 'opencode') {
@@ -396,9 +413,14 @@ export function startBackgroundJob(params: StartJobParams): void {
         cwd: projectPath,
         env: spawnEnv,
         shell: isWindows,
-        detached: false,
+        detached: !isWindows, // Detach on Unix to prevent parent termination
         stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // Unref so the parent process can exit independently (but we still capture output)
+    if (!isWindows) {
+        agentProcess.unref();
+    }
 
     if (useStdin) {
         // Write prompt to stdin
