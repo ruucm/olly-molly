@@ -53,3 +53,5 @@ db/image-settings.json
 
 
 dist
+
+.npmrc
