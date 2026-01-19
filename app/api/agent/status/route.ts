@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRunningJobs, getJobByTicketId, getJobOutput, cancelJob } from '@/lib/agent-jobs';
+import { getRunningJobs, getJobByTicketId, getJobById, getJobOutput, cancelJob } from '@/lib/agent-jobs';
 
 // Get all running jobs
 export async function GET(request: NextRequest) {
@@ -8,9 +8,10 @@ export async function GET(request: NextRequest) {
     const jobId = url.searchParams.get('job_id');
 
     if (jobId) {
-        // Get specific job output
+        // Get specific job output and job info
         const output = getJobOutput(jobId);
-        return NextResponse.json({ output });
+        const job = getJobById(jobId);
+        return NextResponse.json({ output, job });
     }
 
     if (ticketId) {

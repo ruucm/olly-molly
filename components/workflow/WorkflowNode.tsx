@@ -3,7 +3,16 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { Avatar } from '@/components/ui/Avatar';
 import type { Ticket, Member } from '@/lib/client-db';
+
+const roleImages: Record<string, string> = {
+  PM: '/profiles/pm.png',
+  FE_DEV: '/profiles/dev-frontend.png',
+  BACKEND_DEV: '/profiles/dev-backend.png',
+  QA: '/profiles/qa.png',
+  BUG_HUNTER: '/profiles/dev-bughunter.jpg',
+};
 
 export type WorkflowNodeStatus = 'idle' | 'running' | 'completed' | 'failed';
 
@@ -40,10 +49,10 @@ function WorkflowNodeComponent({ data, selected }: NodeProps<WorkflowNodeData>) 
         ${status === 'running' ? 'animate-pulse' : ''}
       `}
     >
-      {/* Input Handle */}
+      {/* Input Handle - Left */}
       <Handle
         type="target"
-        position={Position.Top}
+        position={Position.Left}
         className="!w-3 !h-3 !bg-[var(--text-muted)] !border-2 !border-[var(--bg-primary)] hover:!bg-[var(--accent-primary)]"
       />
 
@@ -74,18 +83,28 @@ function WorkflowNodeComponent({ data, selected }: NodeProps<WorkflowNodeData>) 
 
         {/* Assignees */}
         {assignees.length > 0 && (
-          <div className="flex -space-x-1">
-            {assignees.slice(0, 2).map((member) => (
-              <div
-                key={member.id}
-                className="w-5 h-5 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[10px] border border-[var(--bg-secondary)]"
-                title={member.name}
-              >
-                {member.avatar || member.name.charAt(0)}
-              </div>
-            ))}
+          <div className="flex -space-x-1.5">
+            {assignees.slice(0, 2).map((member, index) => {
+              const profileImage = roleImages[member.role];
+              return (
+                <div
+                  key={member.id}
+                  className="relative"
+                  style={{ zIndex: assignees.slice(0, 2).length - index }}
+                  title={member.name}
+                >
+                  <Avatar
+                    name={member.name}
+                    src={profileImage}
+                    emoji={!profileImage ? member.avatar : undefined}
+                    badge={profileImage ? member.avatar : undefined}
+                    size="sm"
+                  />
+                </div>
+              );
+            })}
             {assignees.length > 2 && (
-              <div className="w-5 h-5 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[10px] text-[var(--text-muted)] border border-[var(--bg-secondary)]">
+              <div className="w-6 h-6 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[10px] text-[var(--text-muted)] border border-[var(--bg-secondary)]">
                 +{assignees.length - 2}
               </div>
             )}
@@ -123,10 +142,10 @@ function WorkflowNodeComponent({ data, selected }: NodeProps<WorkflowNodeData>) 
         </div>
       )}
 
-      {/* Output Handle */}
+      {/* Output Handle - Right */}
       <Handle
         type="source"
-        position={Position.Bottom}
+        position={Position.Right}
         className="!w-3 !h-3 !bg-[var(--text-muted)] !border-2 !border-[var(--bg-primary)] hover:!bg-[var(--accent-primary)]"
       />
     </div>

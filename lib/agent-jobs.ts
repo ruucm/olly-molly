@@ -111,6 +111,23 @@ export function getJobByTicketId(ticketId: string): Omit<RunningJob, 'process'> 
     return null;
 }
 
+export function getJobById(jobId: string): Omit<RunningJob, 'process'> | null {
+    const job = runningJobs.get(jobId);
+    if (!job) return null;
+    return {
+        id: job.id,
+        conversationId: job.conversationId,
+        ticketId: job.ticketId,
+        agentId: job.agentId,
+        agentName: job.agentName,
+        projectPath: job.projectPath,
+        provider: job.provider,
+        startedAt: job.startedAt,
+        output: job.output,
+        status: job.status,
+    };
+}
+
 export function getJobOutput(jobId: string): string | null {
     const job = runningJobs.get(jobId);
     return job?.output || null;

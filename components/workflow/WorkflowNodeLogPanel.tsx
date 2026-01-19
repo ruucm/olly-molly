@@ -163,7 +163,9 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
           </div>
         ) : (
           <div className="space-y-1">
-            {messages.map((msg) => (
+            {[...messages]
+              .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+              .map((msg) => (
               <div key={msg.id} className={`${getMessageTypeStyle(msg.message_type)} whitespace-pre-wrap break-all`}>
                 <span className="text-[var(--text-muted)] mr-2">[{formatTime(msg.created_at)}]</span>
                 {msg.content}
