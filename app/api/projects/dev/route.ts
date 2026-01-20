@@ -96,6 +96,17 @@ export async function POST(request: Request) {
             : projectPath;
 
         if (action === 'start') {
+            // Delete .next folder for clean start
+            const nextDir = path.join(expandedPath, '.next');
+            if (fs.existsSync(nextDir)) {
+                try {
+                    fs.rmSync(nextDir, { recursive: true, force: true });
+                    console.log(`Deleted .next folder: ${nextDir}`);
+                } catch (e) {
+                    console.warn('Failed to delete .next folder:', e);
+                }
+            }
+
             // Kill any existing node processes in this project directory first
             killExistingNodeProcesses(expandedPath);
 
