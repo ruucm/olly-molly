@@ -36,11 +36,56 @@ That's it. Open `http://localhost:1234` and start managing your AI team.
 ## Features
 
 - 🎯 **Kanban Board** — Drag-and-drop task management
-- 🤖 **AI Agents** — PM, Frontend Dev, Backend Dev, QA agents
+- 🤖 **AI Agents** — PM, Frontend Dev, Backend Dev, QA, DevOps, Bug Hunter
 - 💬 **Natural Requests** — Ask PM in plain language, get structured tickets
 - 🔒 **Local-First** — Everything runs on your machine
 - 🎨 **Minimal Design** — Clean, paper-like UI inspired by fontshare.com
 - 🌙 **Dark Mode** — Easy on the eyes
+
+## AI Agents
+
+Olly Molly comes with 6 specialized AI agents, each designed for specific development tasks:
+
+| Agent | Role | Description |
+|-------|------|-------------|
+| 👔 **PM Agent** | Project Manager | Creates tickets, assigns tasks, sets priorities, tracks progress |
+| 🎨 **Frontend Developer** | FE_DEV | React/Next.js UI development, responsive design, API integration |
+| ⚙️ **Backend Developer** | BACKEND_DEV | REST APIs, database design, server-side logic, testing |
+| 🔍 **QA Engineer** | QA | Automated testing with Chrome DevTools/Playwright MCP, bug reporting |
+| 🚀 **DevOps Engineer** | DEVOPS | CI/CD pipelines, deployment, infrastructure, monitoring |
+| 🐛 **Bug Hunter** | BUG_HUNTER | Full-stack debugging, error analysis, regression testing |
+
+### Adding Custom Agents
+
+Create a new file in `agents/` directory:
+
+```typescript
+// agents/my-agent.ts
+import type { AgentDefinition } from './types';
+
+export const myAgent: AgentDefinition = {
+  id: 'my-agent-001',
+  role: 'MY_ROLE',
+  name: 'My Custom Agent',
+  avatar: '🤖',
+  profile_image: null,
+  system_prompt: `Your agent's system prompt here...`,
+  is_default: 1,
+  can_generate_images: 0,
+  can_log_screenshots: 0,
+};
+```
+
+Then add it to `agents/index.ts`:
+
+```typescript
+import { myAgent } from './my-agent';
+
+export const DEFAULT_AGENTS: AgentDefinition[] = [
+  // ... existing agents
+  myAgent,
+];
+```
 
 ## How It Works
 
@@ -201,10 +246,19 @@ gh release upload v0.2.21 dist/prebuilt/olly-molly-win32-x64.tar.gz --clobber
 
 ```
 olly-molly/
-├── app/                 # Next.js app router
-│   ├── api/            # API routes
-│   ├── design-system/  # Design system docs
-│   └── page.tsx        # Main dashboard
+├── agents/             # AI agent definitions
+│   ├── index.ts       # Agent exports & DEFAULT_AGENTS
+│   ├── types.ts       # AgentDefinition type
+│   ├── pm.ts          # PM Agent
+│   ├── fe-dev.ts      # Frontend Developer
+│   ├── be-dev.ts      # Backend Developer
+│   ├── qa.ts          # QA Engineer
+│   ├── devops.ts      # DevOps Engineer
+│   └── bug-hunter.ts  # Bug Hunter
+├── app/                # Next.js app router
+│   ├── api/           # API routes
+│   ├── design-system/ # Design system docs
+│   └── page.tsx       # Main dashboard
 ├── components/         # React components
 │   ├── kanban/        # Kanban board
 │   ├── ui/            # Reusable UI components
