@@ -228,6 +228,23 @@ olly-molly/
 - **Drag & Drop**: dnd-kit
 - **AI**: Codex CLI / OpenCode / Claude CLI
 
+## Troubleshooting
+
+### App stuck on "Loading..."
+
+This is usually caused by **IndexedDB lock**. IndexedDB allows only one connection per database at a time, and if a previous browser session didn't close properly, the lock may persist.
+
+**Solutions:**
+1. **Force quit browser** — Completely close Chrome/browser and reopen
+2. **Hard refresh** — `Cmd+Shift+R` (Mac) or `Ctrl+Shift+R` (Windows)
+3. **Close duplicate tabs** — Make sure only one tab has Olly Molly open
+4. **Clear site data** — DevTools → Application → Storage → Clear site data
+
+**Why this happens:**
+- Browser crashed or was force-quit while the app was running
+- Multiple tabs trying to access the same IndexedDB
+- Browser extension interfering with IndexedDB
+
 ## License
 
 MIT © ruucm
