@@ -6,8 +6,15 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
-import { memberService, ticketService, useProjects } from '@/lib/client-db';
+import { memberService, ticketService, useProjects, useMembers } from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
+
+interface TeamMember {
+    id: string;
+    role: string;
+    name: string;
+    avatar: string | null;
+}
 
 interface CreatedTicket {
     id: string;
@@ -44,9 +51,34 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         tickets: CreatedTicket[];
     } | null>(null);
     const [answer, setAnswer] = useState<string | null>(null);
+    const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
     const projects = useProjects();
     const project = useMemo(() => projects.find((item) => item.id === projectId) || null, [projects, projectId]);
+
+    // Get all members except PM (PM is the assigner, not assignee)
+    const allMembers = useMembers();
+    const assignableMembers = useMemo(() => allMembers.filter(m => m.role !== 'PM'), [allMembers]);
+
+    // Initialize selected members when modal opens
+    useEffect(() => {
+        if (isOpen && selectedMemberIds.length === 0 && assignableMembers.length > 0) {
+            setSelectedMemberIds(assignableMembers.map(m => m.id));
+        }
+    }, [isOpen, assignableMembers, selectedMemberIds.length]);
+
+    const toggleMember = (memberId: string) => {
+        setSelectedMemberIds(prev =>
+            prev.includes(memberId)
+                ? prev.filter(id => id !== memberId)
+                : [...prev, memberId]
+        );
+    };
+
+    const selectedMembers = useMemo(() =>
+        assignableMembers.filter(m => selectedMemberIds.includes(m.id)),
+        [assignableMembers, selectedMemberIds]
+    );
 
     // Match TicketModal behavior: persist provider selection
     useEffect(() => {
@@ -77,6 +109,12 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                 priority: t.priority,
             }));
 
+            // Prepare team members info for the prompt
+            const teamMembers = selectedMembers.map(m => ({
+                role: m.role,
+                name: m.name,
+            }));
+
             const res = await fetch('/api/pm/breakdown', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -86,6 +124,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                     project_path: project?.path,
                     provider,
                     existing_tickets: existingTickets,
+                    team_members: teamMembers,
                 }),
             });
 
@@ -282,6 +321,33 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                 </div>
                             </div>
 
+                            {/* Team Member Selection */}
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-[var(--text-secondary)]">
+                                    작업 분배 대상
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                    {assignableMembers.map(member => (
+                                        <button
+                                            key={member.id}
+                                            type="button"
+                                            onClick={() => toggleMember(member.id)}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all border ${
+                                                selectedMemberIds.includes(member.id)
+                                                    ? 'bg-[var(--accent-primary)] text-white border-[var(--accent-primary)]'
+                                                    : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)] border-[var(--border-primary)] hover:border-[var(--accent-primary)]'
+                                            }`}
+                                        >
+                                            <span>{member.avatar}</span>
+                                            <span>{member.name}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                                {selectedMemberIds.length === 0 && (
+                                    <p className="text-xs text-amber-400">⚠️ 최소 1명의 멤버를 선택해주세요</p>
+                                )}
+                            </div>
+
                             <Textarea
                                 label="기능 요청"
                                 value={request}
@@ -301,7 +367,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                 <Button
                                     variant="primary"
                                     onClick={handleSubmitRequest}
-                                    disabled={!request.trim() || loading}
+                                    disabled={!request.trim() || loading || selectedMemberIds.length === 0}
                                 >
                                     {loading ? (
                                         <>

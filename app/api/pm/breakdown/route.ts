@@ -12,7 +12,7 @@ interface TaskFromAI {
     title: string;
     description: string;
     priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-    assignee_role: 'FE_DEV' | 'BACKEND_DEV' | 'QA' | 'DEVOPS' | 'BUG_HUNTER';
+    assignee_role: string;
 }
 
 interface ExistingTicket {
@@ -21,15 +21,43 @@ interface ExistingTicket {
     priority: string;
 }
 
-function buildSystemPrompt(existingTickets?: ExistingTicket[]): string {
+interface TeamMember {
+    role: string;
+    name: string;
+}
+
+// Default role descriptions for system prompt
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+    FE_DEV: 'Frontend Developer: Handles UI/UX, React, Next.js, CSS, components, user interfaces',
+    BACKEND_DEV: 'Backend Developer: Handles APIs, databases, server logic, authentication, business logic',
+    QA: 'QA Engineer: Handles testing, quality assurance, bug verification, E2E tests',
+    DEVOPS: 'DevOps Engineer: Handles deployment, CI/CD, infrastructure, monitoring',
+    BUG_HUNTER: 'Bug Hunter: Full Stack Developer specialized in quickly fixing bugs, debugging, and hotfixes',
+};
+
+function buildSystemPrompt(existingTickets?: ExistingTicket[], teamMembers?: TeamMember[]): string {
+    // Build team description dynamically based on provided members
+    let teamDescription = '';
+    const availableRoles: string[] = [];
+
+    if (teamMembers && teamMembers.length > 0) {
+        teamDescription = teamMembers.map(m => {
+            availableRoles.push(m.role);
+            const roleDesc = ROLE_DESCRIPTIONS[m.role] || `${m.role}: ${m.name}`;
+            return `- ${m.role} (${m.name}): ${roleDesc.split(': ')[1] || 'General tasks'}`;
+        }).join('\n');
+    } else {
+        // Fallback to default team if no members provided
+        teamDescription = Object.entries(ROLE_DESCRIPTIONS).map(([role, desc]) => {
+            availableRoles.push(role);
+            return `- ${desc}`;
+        }).join('\n');
+    }
+
     let prompt = `You are a PM (Project Manager) AI agent for a software development team.
 
 Your team consists of:
-- FE_DEV (Frontend Developer): Handles UI/UX, React, Next.js, CSS, components, user interfaces
-- BACKEND_DEV (Backend Developer): Handles APIs, databases, server logic, authentication, business logic
-- QA (QA Engineer): Handles testing, quality assurance, bug verification, E2E tests
-- DEVOPS (DevOps Engineer): Handles deployment, CI/CD, infrastructure, monitoring
-- BUG_HUNTER (Bug Hunter): Full Stack Developer specialized in quickly fixing bugs, debugging, and hotfixes
+${teamDescription}
 
 When given a feature request, you must:
 1. Break it down into simple, actionable tasks written for non-technical readers
@@ -37,11 +65,12 @@ When given a feature request, you must:
 3. Set priorities (CRITICAL > HIGH > MEDIUM > LOW)
 
 IMPORTANT RULES:
+- ONLY assign tasks to these available roles: ${availableRoles.join(', ')}
 - Create focused, single-responsibility tasks
 - Keep descriptions short and avoid technical jargon
-- Prefer FE_DEV-only tasks when backend changes are not clearly required
-- Only create BACKEND_DEV tasks if APIs, data storage, auth, or server logic are truly needed
-- Only add QA/DEVOPS tasks when they are clearly necessary
+- Prefer FE_DEV-only tasks when backend changes are not clearly required (if FE_DEV is available)
+- Only create BACKEND_DEV tasks if APIs, data storage, auth, or server logic are truly needed (if BACKEND_DEV is available)
+- Only add QA/DEVOPS tasks when they are clearly necessary (if they are available)
 - Use Korean for titles and descriptions
 - AVOID creating duplicate tasks that already exist on the board
 - ORDER tasks by execution sequence (tasks that must be done first should come first)
@@ -54,24 +83,30 @@ IMPORTANT RULES:
         });
     }
 
+    // Build example using available roles
+    const exampleRole1 = availableRoles[0] || 'FE_DEV';
+    const exampleRole2 = availableRoles[1] || availableRoles[0] || 'FE_DEV';
+
     prompt += `\n\nCRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The format must be exactly:
 {
   "tasks": [
     {
-      "title": "1. 백엔드 API 설계 및 구현",
+      "title": "1. 첫 번째 작업",
       "description": "Detailed task description in Korean",
       "priority": "HIGH",
-      "assignee_role": "BACKEND_DEV"
+      "assignee_role": "${exampleRole1}"
     },
     {
-      "title": "2. 프론트엔드 UI 구현",
+      "title": "2. 두 번째 작업",
       "description": "Detailed task description in Korean",
       "priority": "HIGH",
-      "assignee_role": "FE_DEV"
+      "assignee_role": "${exampleRole2}"
     }
   ],
   "summary": "Brief summary of the breakdown in Korean"
-}`;
+}
+
+REMINDER: assignee_role MUST be one of: ${availableRoles.join(', ')}`;
 
     return prompt;
 }
@@ -124,9 +159,9 @@ function classifyCliError(raw: string): { status: number; publicMessage: string 
     return { status: 500, publicMessage: 'Failed to run CLI.' };
 }
 
-async function breakdownWithCLI(cli: SupportedCLI, request: string, projectPath: string, existingTickets?: ExistingTicket[]): Promise<{ tasks: TaskFromAI[]; summary: string }> {
+async function breakdownWithCLI(cli: SupportedCLI, request: string, projectPath: string, existingTickets?: ExistingTicket[], teamMembers?: TeamMember[]): Promise<{ tasks: TaskFromAI[]; summary: string }> {
 
-    const systemPrompt = buildSystemPrompt(existingTickets);
+    const systemPrompt = buildSystemPrompt(existingTickets, teamMembers);
     const fullPrompt = `${systemPrompt}\n\nFeature Request: ${request}`;
 
     return new Promise((resolve, reject) => {
@@ -254,7 +289,8 @@ export async function POST(request: NextRequest) {
 
         // Run ONLY the requested provider (no fallback)
         const existingTickets = Array.isArray(body.existing_tickets) ? body.existing_tickets : [];
-        const aiResponse = await breakdownWithCLI(requestedProvider, body.request, projectPath, existingTickets);
+        const teamMembers = Array.isArray(body.team_members) ? body.team_members : undefined;
+        const aiResponse = await breakdownWithCLI(requestedProvider, body.request, projectPath, existingTickets, teamMembers);
 
         return NextResponse.json({
             success: true,
