@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
+  <a href="#cli-options">CLI Options</a> •
   <a href="#features">Features</a> •
   <a href="#how-it-works">How It Works</a> •
   <a href="#contributing">Contributing</a>
@@ -131,6 +132,88 @@ from GitHub Releases when available. Asset naming:
 olly-molly-darwin-arm64.tar.gz
 olly-molly-darwin-x64.tar.gz
 olly-molly-win32-x64.tar.gz
+```
+
+### CLI Options
+
+```bash
+olly-molly [options]
+```
+
+#### Server Settings
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--port` | `-p` | `1234` | Server port |
+| `--host` | `-H` | `localhost` | Binding host |
+| `--no-open` | | | Disable auto browser open |
+
+#### Data/Path Settings
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--data-dir` | `-d` | `~/.olly-molly` | App data directory |
+| `--db-path` | | `<data-dir>/db` | Database path |
+
+#### Development
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--dev` | | Run in development mode (`next dev`) |
+| `--verbose` | `-v` | Enable verbose logging |
+
+#### Advanced Options
+
+| Flag | Description |
+|------|-------------|
+| `--reset` | Reset all app data (with confirmation prompt) |
+| `--export-db <path>` | Export database to tar.gz file |
+| `--import-db <path>` | Import database from tar.gz file |
+
+#### Info
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--version` | `-V` | Show version and exit |
+| `--help` | `-h` | Show help and exit |
+
+#### Environment Variables
+
+You can also configure Olly Molly using environment variables (CLI arguments take priority):
+
+| Variable | Description |
+|----------|-------------|
+| `OLLY_MOLLY_PORT` | Server port |
+| `OLLY_MOLLY_HOST` | Binding host |
+| `OLLY_MOLLY_DATA_DIR` | App data directory |
+| `OLLY_MOLLY_DB_PATH` | Database path |
+
+#### Examples
+
+```bash
+# Start with defaults (port 1234, auto-open browser)
+npx olly-molly
+
+# Use custom port
+npx olly-molly -p 3000
+
+# Bind to all interfaces (for network access)
+npx olly-molly --host 0.0.0.0
+
+# Run in development mode with verbose logging
+npx olly-molly --dev -v
+
+# Disable auto browser open
+npx olly-molly --no-open
+
+# Export database for backup
+npx olly-molly --export-db backup.tar.gz
+
+# Import database from backup
+npx olly-molly --import-db backup.tar.gz
+
+# Reset all app data
+npx olly-molly --reset
 ```
 
 ### Or install globally
