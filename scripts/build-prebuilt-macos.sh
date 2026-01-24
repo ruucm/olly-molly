@@ -13,10 +13,20 @@ npm install
 echo "Building Next.js..."
 npm run build
 
-STANDALONE_STATIC="${ROOT_DIR}/.next/standalone/.next/static"
+# Find the actual standalone app directory (Next.js mirrors full path)
+STANDALONE_APP_DIR=$(find "${ROOT_DIR}/.next/standalone" -name "server.js" -path "*/standalone/*/server.js" ! -path "*/node_modules/*" -exec dirname {} \; | head -1)
+if [[ -z "${STANDALONE_APP_DIR}" ]]; then
+  echo "Error: Could not find server.js in standalone output"
+  exit 1
+fi
+
+STANDALONE_STATIC="${STANDALONE_APP_DIR}/.next/static"
 rm -rf "${STANDALONE_STATIC}"
 mkdir -p "$(dirname "${STANDALONE_STATIC}")"
 cp -R "${ROOT_DIR}/.next/static" "${STANDALONE_STATIC}"
+
+# Also copy public folder to standalone app dir
+cp -R "${ROOT_DIR}/public" "${STANDALONE_APP_DIR}/public"
 
 ARCH="$(uname -m)"
 case "${ARCH}" in
@@ -28,10 +38,18 @@ esac
 VERSION="$(node -p "require('./package.json').version")"
 TARBALL="${OUT_DIR}/olly-molly-darwin-${ARCH_TAG}.tar.gz"
 
-echo "Packaging ${TARBALL}..."
-tar -czf "${TARBALL}" \
-  .next/standalone \
-  package.json \
-  public
+# Create a clean tarball structure
+STAGING_DIR="${OUT_DIR}/staging"
+rm -rf "${STAGING_DIR}"
+mkdir -p "${STAGING_DIR}/.next/standalone"
 
+# Copy standalone contents (flatten the nested path)
+# Use rsync to include hidden files like .next
+rsync -a "${STANDALONE_APP_DIR}/" "${STAGING_DIR}/.next/standalone/"
+cp "${ROOT_DIR}/package.json" "${STAGING_DIR}/"
+
+echo "Packaging ${TARBALL}..."
+tar -czf "${TARBALL}" -C "${STAGING_DIR}" .
+
+rm -rf "${STAGING_DIR}"
 echo "Done: ${TARBALL}"
