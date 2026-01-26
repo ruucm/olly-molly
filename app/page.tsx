@@ -24,6 +24,8 @@ import {
   type Ticket,
   type Project,
 } from '@/lib/client-db';
+import { UserMenu } from '@/components/auth/UserMenu';
+import { isAuthRequired } from '@/lib/auth-config';
 
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
 import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
@@ -448,6 +450,7 @@ export default function Dashboard() {
               <Icon icon={Settings} />
             </button>
             <ThemeToggle />
+            {isAuthRequired() && <UserMenu />}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
