@@ -40,6 +40,8 @@
     "@tailwindcss/postcss": "^4",
     "@tanstack/db": "^0.5.20",
     "@tanstack/react-db": "^0.1.64",
+    "@types/archiver": "^7.0.0",
+    "archiver": "^7.0.1",
     "idb": "^8.0.0",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",

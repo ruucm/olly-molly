@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { Modal } from '@/components/ui/Modal';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import { Button } from '@/components/ui/Button';
+import { Download } from 'lucide-react';
 
 interface ProjectArtifactsModalProps {
     isOpen: boolean;
@@ -221,6 +222,7 @@ export function ProjectArtifactsModal({
     const [gitActionLoading, setGitActionLoading] = useState<string | null>(null);
     const [gitCommitMessage, setGitCommitMessage] = useState('');
     const [gitStashMessage, setGitStashMessage] = useState('');
+    const [downloading, setDownloading] = useState(false);
 
     const breadcrumbs = useMemo(() => {
         if (!currentPath) {
@@ -348,6 +350,47 @@ export function ProjectArtifactsModal({
             loadGit();
         }
     }, [activeTab, isOpen, projectId, loadGit]);
+
+    const handleDownloadProject = useCallback(async (downloadPath?: string) => {
+        if (!projectPath) return;
+        setDownloading(true);
+        try {
+            const params = new URLSearchParams();
+            params.set('projectPath', projectPath);
+            if (downloadPath) {
+                params.set('path', downloadPath);
+            }
+            const res = await fetch(`/api/projects/files/download?${params.toString()}`);
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Download failed');
+            }
+            const blob = await res.blob();
+            const contentDisposition = res.headers.get('Content-Disposition');
+            let filename = downloadPath
+                ? `${downloadPath.split('/').pop() || 'files'}.zip`
+                : `${projectName || 'project'}.zip`;
+            if (contentDisposition) {
+                const match = contentDisposition.match(/filename="(.+)"/);
+                if (match) {
+                    filename = decodeURIComponent(match[1]);
+                }
+            }
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('Download failed:', err);
+            setError(err instanceof Error ? err.message : 'Download failed');
+        } finally {
+            setDownloading(false);
+        }
+    }, [projectPath, projectName]);
 
     const handleEntryClick = (entry: FileEntry) => {
         if (entry.type === 'directory') {
@@ -520,14 +563,25 @@ export function ProjectArtifactsModal({
                                             </button>
                                         ))}
                                     </div>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => loadDirectory(currentPath)}
-                                        disabled={directoryLoading}
-                                    >
-                                        새로고침
-                                    </Button>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => handleDownloadProject(currentPath || undefined)}
+                                            disabled={downloading || directoryLoading}
+                                        >
+                                            <Download className="w-3.5 h-3.5 mr-1" />
+                                            {downloading ? '다운로드 중...' : currentPath ? '폴더 다운로드' : '전체 다운로드'}
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => loadDirectory(currentPath)}
+                                            disabled={directoryLoading}
+                                        >
+                                            새로고침
+                                        </Button>
+                                    </div>
                                 </div>
 
                                 {rootArtifacts.length > 0 && (
