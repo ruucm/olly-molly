@@ -25,7 +25,8 @@
  * ```
  */
 
-export type { AgentDefinition } from './types';
+export type { AgentDefinition, AgentCategory, MarketAgentDefinition } from './types';
+export { getAgentMetadata } from './types';
 
 import { pmAgent } from './pm';
 import { feDevAgent } from './fe-dev';

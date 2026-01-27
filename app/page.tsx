@@ -16,15 +16,20 @@ import packageJson from '@/package.json';
 import {
   initClientDb,
   useMembers,
+  useMarketAgents,
   useTickets,
   memberService,
+  marketAgentService,
   ticketService,
   projectService,
   userSettingsService,
   type Member,
+  type MarketAgent,
   type Ticket,
   type Project,
 } from '@/lib/client-db';
+import { AgentMarketModal } from '@/components/market';
+import type { AgentCategory } from '@/agents';
 
 import { EmailSetup } from '@/components/onboarding/EmailSetup';
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
@@ -72,6 +77,7 @@ export default function Dashboard() {
 
   const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
+  const [marketModalOpen, setMarketModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [emailChecked, setEmailChecked] = useState(false);
@@ -88,6 +94,7 @@ export default function Dashboard() {
   const appVersion = packageJson.version;
 
   const members = useMembers();
+  const marketAgents = useMarketAgents();
   const allTickets = useTickets();
 
   const membersById = useMemo(() => {
@@ -227,6 +234,46 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Failed to delete member:', error);
       alert('Failed to delete member. Please try again.');
+    }
+  }, []);
+
+  const handleAddFromMarket = useCallback((agentId: string) => {
+    try {
+      memberService.addFromMarket(agentId);
+    } catch (error) {
+      console.error('Failed to add agent from market:', error);
+      alert('Failed to add agent. Please try again.');
+    }
+  }, []);
+
+  const handleCreateMarketAgent = useCallback((data: {
+    role: string;
+    name: string;
+    avatar: string;
+    system_prompt: string;
+    description: string;
+    category: AgentCategory;
+    tags: string[];
+    can_generate_images: boolean;
+    can_log_screenshots: boolean;
+  }) => {
+    try {
+      marketAgentService.create(data);
+    } catch (error) {
+      console.error('Failed to create market agent:', error);
+      alert('Failed to create agent. Please try again.');
+    }
+  }, []);
+
+  const handleDeleteMarketAgent = useCallback((id: string) => {
+    try {
+      const result = marketAgentService.delete(id);
+      if (!result.success) {
+        alert(result.error || 'Failed to delete agent');
+      }
+    } catch (error) {
+      console.error('Failed to delete market agent:', error);
+      alert('Failed to delete agent. Please try again.');
     }
   }, []);
 
@@ -705,6 +752,7 @@ export default function Dashboard() {
               onUpdateMember={handleMemberUpdate}
               onCreateMember={handleMemberCreate}
               onDeleteMember={handleMemberDelete}
+              onOpenMarket={() => setMarketModalOpen(true)}
             />
           </div>
         </aside>
@@ -747,6 +795,17 @@ export default function Dashboard() {
         tickets={selectedTickets}
         members={members}
         onMerge={handleMergeTickets}
+      />
+
+      {/* Agent Market Modal */}
+      <AgentMarketModal
+        isOpen={marketModalOpen}
+        onClose={() => setMarketModalOpen(false)}
+        marketAgents={marketAgents}
+        members={members}
+        onAddToTeam={handleAddFromMarket}
+        onCreateMarketAgent={handleCreateMarketAgent}
+        onDeleteMarketAgent={handleDeleteMarketAgent}
       />
     </div>
   );

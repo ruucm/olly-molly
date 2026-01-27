@@ -9,7 +9,8 @@ import {
 } from '@tanstack/react-db';
 import type { SyncConfig } from '@tanstack/react-db';
 import type { PendingMutation } from '@tanstack/react-db';
-import { DEFAULT_AGENTS } from '@/agents';
+import { DEFAULT_AGENTS, getAgentMetadata } from '@/agents';
+import type { AgentCategory } from '@/agents';
 
 export interface Member {
   id: string;
@@ -19,6 +20,24 @@ export interface Member {
   profile_image: string | null;
   system_prompt: string;
   is_default: number;
+  can_generate_images: number;
+  can_log_screenshots: number;
+  source_market_agent_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketAgent {
+  id: string;
+  role: string;
+  name: string;
+  avatar: string;
+  profile_image: string | null;
+  system_prompt: string;
+  description: string;
+  category: AgentCategory;
+  tags: string[];
+  is_builtin: number;
   can_generate_images: number;
   can_log_screenshots: number;
   created_at: string;
@@ -126,10 +145,11 @@ export interface WorkflowEdge {
 }
 
 const DB_NAME = 'olly-molly';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORE_NAMES = {
   members: 'members',
+  marketAgents: 'market_agents',
   tickets: 'tickets',
   activityLogs: 'activity_logs',
   projects: 'projects',
@@ -151,6 +171,7 @@ const DB_BACKUP_VERSION = 1;
 const AUTO_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 const BACKUP_STORE_NAMES: StoreName[] = [
   STORE_NAMES.members,
+  STORE_NAMES.marketAgents,
   STORE_NAMES.tickets,
   STORE_NAMES.activityLogs,
   STORE_NAMES.projects,
@@ -237,6 +258,9 @@ function getIdb(): Promise<IDBPDatabase> {
       upgrade(db) {
         if (!db.objectStoreNames.contains(STORE_NAMES.members)) {
           db.createObjectStore(STORE_NAMES.members, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.marketAgents)) {
+          db.createObjectStore(STORE_NAMES.marketAgents, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(STORE_NAMES.tickets)) {
           db.createObjectStore(STORE_NAMES.tickets, { keyPath: 'id' });
@@ -623,6 +647,7 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
 }
 
 const membersCollection = createIndexedDbCollection<Member>(STORE_NAMES.members);
+const marketAgentsCollection = createIndexedDbCollection<MarketAgent>(STORE_NAMES.marketAgents);
 const ticketsCollection = createIndexedDbCollection<Ticket>(STORE_NAMES.tickets);
 const activityLogsCollection = createIndexedDbCollection<ActivityLog>(STORE_NAMES.activityLogs);
 const projectsCollection = createIndexedDbCollection<Project>(STORE_NAMES.projects);
@@ -644,17 +669,33 @@ let initPromise: Promise<void> | null = null;
 export function initClientDb(): Promise<void> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    await membersCollection.preload();
-    if (membersCollection.size === 0) {
+    // Preload both collections
+    await Promise.all([
+      membersCollection.preload(),
+      marketAgentsCollection.preload(),
+    ]);
+
+    // Seed market agents from DEFAULT_AGENTS if market is empty
+    if (marketAgentsCollection.size === 0) {
       const now = new Date().toISOString();
-      membersCollection.insert(
-        DEFAULT_AGENTS.map((member) => ({
-          ...member,
-          created_at: now,
-          updated_at: now,
-        })),
+      marketAgentsCollection.insert(
+        DEFAULT_AGENTS.map((agent) => {
+          const metadata = getAgentMetadata(agent.role);
+          return {
+            ...agent,
+            description: metadata.description,
+            category: metadata.category,
+            tags: metadata.tags,
+            is_builtin: 1,
+            created_at: now,
+            updated_at: now,
+          };
+        }),
       );
     }
+
+    // Note: Members collection starts empty. Users must add agents from market.
+
     scheduleSqliteDump();
     startAutoBackup();
   })();
@@ -664,6 +705,11 @@ export function initClientDb(): Promise<void> {
 export function useMembers() {
   const { data } = useLiveQuery(() => membersCollection);
   return (data ?? []) as Member[];
+}
+
+export function useMarketAgents() {
+  const { data } = useLiveQuery(() => marketAgentsCollection);
+  return (data ?? []) as MarketAgent[];
 }
 
 export function useTickets() {
@@ -746,6 +792,7 @@ export const memberService = {
       is_default: 0,
       can_generate_images: data.can_generate_images ? 1 : 0,
       can_log_screenshots: data.can_log_screenshots ? 1 : 0,
+      source_market_agent_id: null,
       created_at: now,
       updated_at: now,
     };
@@ -757,10 +804,117 @@ export const memberService = {
     if (!member) {
       return { success: false, error: 'Member not found' };
     }
-    if (member.is_default === 1) {
-      return { success: false, error: 'Cannot delete default team members' };
-    }
     membersCollection.delete(id);
+    return { success: true };
+  },
+  addFromMarket(marketAgentId: string): Member {
+    const marketAgent = marketAgentService.getById(marketAgentId);
+    if (!marketAgent) {
+      throw new Error('Market agent not found');
+    }
+    const now = new Date().toISOString();
+    const member: Member = {
+      id: uuidv4(),
+      role: marketAgent.role,
+      name: marketAgent.name,
+      avatar: marketAgent.avatar,
+      profile_image: marketAgent.profile_image,
+      system_prompt: marketAgent.system_prompt,
+      is_default: 0,
+      can_generate_images: marketAgent.can_generate_images,
+      can_log_screenshots: marketAgent.can_log_screenshots,
+      source_market_agent_id: marketAgent.id,
+      created_at: now,
+      updated_at: now,
+    };
+    membersCollection.insert(member);
+    return member;
+  },
+};
+
+export const marketAgentService = {
+  getAll(): MarketAgent[] {
+    return Array.from(marketAgentsCollection.values());
+  },
+  getById(id: string): MarketAgent | undefined {
+    return marketAgentsCollection.get(id);
+  },
+  getByCategory(category: AgentCategory): MarketAgent[] {
+    return Array.from(marketAgentsCollection.values()).filter((agent) => agent.category === category);
+  },
+  getBuiltins(): MarketAgent[] {
+    return Array.from(marketAgentsCollection.values()).filter((agent) => agent.is_builtin === 1);
+  },
+  getUserCreated(): MarketAgent[] {
+    return Array.from(marketAgentsCollection.values()).filter((agent) => agent.is_builtin === 0);
+  },
+  create(data: {
+    role: string;
+    name: string;
+    avatar: string;
+    system_prompt: string;
+    description: string;
+    category: AgentCategory;
+    tags?: string[];
+    can_generate_images?: boolean;
+    can_log_screenshots?: boolean;
+  }): MarketAgent {
+    const now = new Date().toISOString();
+    const agent: MarketAgent = {
+      id: uuidv4(),
+      role: data.role,
+      name: data.name,
+      avatar: data.avatar,
+      profile_image: null,
+      system_prompt: data.system_prompt,
+      description: data.description,
+      category: data.category,
+      tags: data.tags || [],
+      is_builtin: 0,
+      can_generate_images: data.can_generate_images ? 1 : 0,
+      can_log_screenshots: data.can_log_screenshots ? 1 : 0,
+      created_at: now,
+      updated_at: now,
+    };
+    marketAgentsCollection.insert(agent);
+    return agent;
+  },
+  update(
+    id: string,
+    data: Partial<Pick<MarketAgent, 'name' | 'avatar' | 'profile_image' | 'system_prompt' | 'description' | 'category' | 'tags' | 'can_generate_images' | 'can_log_screenshots'>>,
+  ): MarketAgent | undefined {
+    const agent = this.getById(id);
+    if (!agent) return undefined;
+    // Prevent editing builtin agents
+    if (agent.is_builtin === 1) return undefined;
+
+    marketAgentsCollection.update(id, (draft) => {
+      if (data.name !== undefined) draft.name = data.name;
+      if (data.avatar !== undefined) draft.avatar = data.avatar;
+      if (data.profile_image !== undefined) draft.profile_image = data.profile_image;
+      if (data.system_prompt !== undefined) draft.system_prompt = data.system_prompt;
+      if (data.description !== undefined) draft.description = data.description;
+      if (data.category !== undefined) draft.category = data.category;
+      if (data.tags !== undefined) draft.tags = data.tags;
+      if (data.can_generate_images !== undefined) {
+        draft.can_generate_images = data.can_generate_images ? 1 : 0;
+      }
+      if (data.can_log_screenshots !== undefined) {
+        draft.can_log_screenshots = data.can_log_screenshots ? 1 : 0;
+      }
+      draft.updated_at = new Date().toISOString();
+    });
+    return this.getById(id);
+  },
+  delete(id: string): { success: boolean; error?: string } {
+    const agent = this.getById(id);
+    if (!agent) {
+      return { success: false, error: 'Agent not found' };
+    }
+    if (agent.is_builtin === 1) {
+      return { success: false, error: 'Cannot delete builtin agents' };
+    }
+    marketAgentsCollection.delete(id);
     return { success: true };
   },
 };
@@ -1135,6 +1289,7 @@ export const workflowEdgeService = {
 
 export const collections = {
   membersCollection,
+  marketAgentsCollection,
   ticketsCollection,
   activityLogsCollection,
   projectsCollection,
