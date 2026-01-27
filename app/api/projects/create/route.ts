@@ -4,6 +4,17 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+function emailToDir(email: string): string {
+    return email.replace(/@/g, '_at_').replace(/\./g, '_');
+}
+
+function getBaseProjectPath(email?: string): string {
+    if (email) {
+        return path.join(os.homedir(), 'Projects', emailToDir(email));
+    }
+    return path.join(os.homedir(), 'Projects');
+}
+
 async function runCreateNextApp(targetPath: string): Promise<void> {
     const isWin = process.platform === 'win32';
     const cmd = 'npx';
@@ -51,6 +62,7 @@ export async function POST(request: Request) {
     try {
         const body = await request.json();
         const trimmedName = typeof body.projectName === 'string' ? body.projectName.trim() : '';
+        const userEmail = body.email as string | undefined;
 
         if (!trimmedName) {
             return NextResponse.json({ error: 'Project name is required' }, { status: 400 });
@@ -59,7 +71,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
         }
 
-        const basePath = path.join(os.homedir(), 'Projects');
+        const basePath = getBaseProjectPath(userEmail);
         const targetPath = path.join(basePath, trimmedName);
 
         if (fs.existsSync(targetPath)) {

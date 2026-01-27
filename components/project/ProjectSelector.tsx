@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
-import { projectService, useProjects, type Project, exportDbBackup, importDbBackup } from '@/lib/client-db';
+import { projectService, useProjects, userSettingsService, type Project, exportDbBackup, importDbBackup } from '@/lib/client-db';
 
 
 interface ProjectSelectorProps {
@@ -40,6 +40,8 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
     const [restoreStatus, setRestoreStatus] = useState<'idle' | 'working' | 'success' | 'error'>('idle');
     const [restoreMessage, setRestoreMessage] = useState('');
     const restoreInputRef = useRef<HTMLInputElement | null>(null);
+    const [userEmail, setUserEmail] = useState<string | null>(null);
+    const basePath = userEmail ? `~/Projects/${userSettingsService.emailToDir(userEmail)}` : '~/Projects';
 
     const storageKey = 'olly-active-project-id';
     const getStoredProjectId = () => {
@@ -74,6 +76,10 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         setActiveProject(resolvedActiveProject);
         onProjectChange?.(resolvedActiveProject);
     }, [resolvedActiveProject, onProjectChange]);
+
+    useEffect(() => {
+        userSettingsService.getEmail().then(setUserEmail);
+    }, []);
 
     useEffect(() => {
         if (isModalOpen) {
@@ -192,6 +198,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     projectName: createName.trim(),
+                    email: userEmail,
                 }),
             });
 
@@ -213,12 +220,12 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                 })
                 : projectService.create({
                     name: createName.trim(),
-                    path: data.path || `~/Projects/${createName.trim()}`,
+                    path: data.path || `${basePath}/${createName.trim()}`,
                     description: 'Next.js project',
                 });
             handleSelectProject(project.id);
 
-            alert(`✅ 프로젝트가 생성되었습니다!\n경로: ~/Projects/${createName.trim()}`);
+            alert(`✅ 프로젝트가 생성되었습니다!\n경로: ${data.path || basePath + '/' + createName.trim()}`);
         } catch (err) {
             setCreateError(err instanceof Error ? err.message : 'Failed to create project');
         } finally {
@@ -241,6 +248,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                     action: 'create_empty',
                     name: emptyName.trim(),
                     parentPath: emptyParentPath.trim() || undefined,
+                    email: userEmail,
                 }),
             });
 
@@ -364,7 +372,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                     {activeTab === 'create' && (
                         <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg space-y-3">
                             <p className="text-xs text-[var(--text-muted)]">
-                                Next.js 프로젝트를 ~/Projects/ 폴더에 생성합니다
+                                Next.js 프로젝트를 {basePath} 폴더에 생성합니다
                             </p>
                             <Input
                                 placeholder="my-awesome-app"
@@ -373,7 +381,7 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                                 label="프로젝트 이름"
                             />
                             <p className="text-xs text-[var(--text-muted)]">
-                                📍 경로: ~/Projects/{createName || 'project-name'}
+                                📍 경로: {basePath}/{createName || 'project-name'}
                             </p>
                             {createProgress && (
                                 <p className="text-sm text-blue-400">{createProgress}</p>
@@ -406,13 +414,13 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
                                 label="프로젝트 이름"
                             />
                             <Input
-                                placeholder="~/Projects (선택사항)"
+                                placeholder={`${basePath} (선택사항)`}
                                 value={emptyParentPath}
                                 onChange={(e) => setEmptyParentPath(e.target.value)}
                                 label="부모 경로"
                             />
                             <p className="text-xs text-[var(--text-muted)]">
-                                📍 경로: {emptyParentPath.trim() || '~/Projects'}/{emptyName || 'project-name'}
+                                📍 경로: {emptyParentPath.trim() || basePath}/{emptyName || 'project-name'}
                             </p>
                             {emptyError && (
                                 <p className="text-sm text-red-400">{emptyError}</p>

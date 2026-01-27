@@ -20,11 +20,13 @@ import {
   memberService,
   ticketService,
   projectService,
+  userSettingsService,
   type Member,
   type Ticket,
   type Project,
 } from '@/lib/client-db';
 
+import { EmailSetup } from '@/components/onboarding/EmailSetup';
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
 import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
 
@@ -71,6 +73,8 @@ export default function Dashboard() {
   const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [emailChecked, setEmailChecked] = useState(false);
 
   // View mode state
   const [activeView, setActiveView] = useState<ViewMode>('kanban');
@@ -135,6 +139,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     initClientDb()
+      .then(async () => {
+        const email = await userSettingsService.getEmail();
+        setUserEmail(email);
+        setEmailChecked(true);
+      })
       .catch((error) => {
         console.error('Failed to initialize local database:', error);
       })
@@ -317,6 +326,13 @@ export default function Dashboard() {
           <p className="text-xs text-[var(--text-muted)]">Loading...</p>
         </div>
       </div>
+    );
+  }
+
+  // Show email setup for first-time users
+  if (emailChecked && !userEmail) {
+    return (
+      <EmailSetup onComplete={(email) => setUserEmail(email)} />
     );
   }
 

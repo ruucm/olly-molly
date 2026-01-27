@@ -3,6 +3,17 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+function emailToDir(email: string): string {
+    return email.replace(/@/g, '_at_').replace(/\./g, '_');
+}
+
+function getBaseProjectPath(email?: string): string {
+    if (email) {
+        return path.join(os.homedir(), 'Projects', emailToDir(email));
+    }
+    return path.join(os.homedir(), 'Projects');
+}
+
 export async function GET() {
     try {
         return NextResponse.json([]);
@@ -16,6 +27,7 @@ export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
         const isCreateEmpty = body.action === 'create_empty' || body.createEmpty === true;
+        const userEmail = body.email as string | undefined;
 
         if (isCreateEmpty) {
             if (!body.name || typeof body.name !== 'string') {
@@ -24,7 +36,7 @@ export async function POST(request: NextRequest) {
 
             const basePath = typeof body.parentPath === 'string' && body.parentPath.trim()
                 ? body.parentPath.trim()
-                : path.join(os.homedir(), 'Projects');
+                : getBaseProjectPath(userEmail);
             const projectPath = typeof body.path === 'string' && body.path.trim()
                 ? body.path.trim()
                 : path.join(basePath, body.name.trim());

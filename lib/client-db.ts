@@ -1145,3 +1145,36 @@ export const collections = {
   workflowNodesCollection,
   workflowEdgesCollection,
 };
+
+// User Settings (stored in meta store)
+export interface UserSettings {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export const userSettingsService = {
+  async get(): Promise<UserSettings | null> {
+    const db = await getIdb();
+    const settings = await db.get(STORE_NAMES.meta, 'user_settings');
+    return settings as UserSettings | null;
+  },
+  async set(email: string): Promise<UserSettings> {
+    const db = await getIdb();
+    const settings: UserSettings = {
+      id: 'user_settings',
+      email: email.trim().toLowerCase(),
+      created_at: new Date().toISOString(),
+    };
+    await db.put(STORE_NAMES.meta, settings);
+    return settings;
+  },
+  async getEmail(): Promise<string | null> {
+    const settings = await this.get();
+    return settings?.email || null;
+  },
+  // Convert email to safe directory name
+  emailToDir(email: string): string {
+    return email.replace(/@/g, '_at_').replace(/\./g, '_');
+  },
+};
