@@ -640,6 +640,38 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Mobile Ticket Sidebar Overlay */}
+        {ticketSidebarOpen && selectedTicket && (
+          <div
+            className="fixed inset-0 bg-black/50 z-30 md:hidden"
+            onClick={() => {
+              setTicketSidebarOpen(false);
+              setSelectedTicket(null);
+            }}
+          />
+        )}
+        <div className={`
+          fixed inset-0 z-40 md:hidden bg-[var(--bg-primary)]
+          transform transition-transform duration-300 ease-out
+          safe-area-bottom
+          ${ticketSidebarOpen && selectedTicket ? 'translate-x-0' : 'translate-x-full'}
+        `}>
+          {ticketSidebarOpen && selectedTicket && (
+            <TicketSidebar
+              isOpen={ticketSidebarOpen}
+              onClose={() => {
+                setTicketSidebarOpen(false);
+                setSelectedTicket(null);
+              }}
+              ticket={selectedTicket}
+              members={members}
+              onTicketUpdate={handleTicketUpdate}
+              onTicketDelete={handleTicketDelete}
+              hasActiveProject={!!activeProject}
+            />
+          )}
+        </div>
+
         {/* Team Sidebar Backdrop - Mobile */}
         {sidebarOpen && (
           <div

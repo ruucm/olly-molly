@@ -467,7 +467,7 @@ export function TicketSidebar({
     if (!isOpen || !ticket) return null;
 
     return (
-        <div className="h-full bg-secondary border-l border-primary flex flex-col overflow-hidden fixed md:relative inset-0 md:inset-auto z-50 md:z-auto">
+        <div className="h-full w-full bg-secondary md:border-l border-primary flex flex-col overflow-hidden">
             {/* Minimal Header */}
             <div
                 className="p-3 md:p-3 border-b border-primary flex items-center justify-between flex-shrink-0 cursor-pointer hover:bg-tertiary/50 transition-colors safe-area-top"
