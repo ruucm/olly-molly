@@ -1,12 +1,12 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Modal } from '@/components/ui/Modal';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import { Button } from '@/components/ui/Button';
-import { Download } from 'lucide-react';
+import { Download, Upload, Trash2, Image, FileText, Table, File, Check, AlertCircle } from 'lucide-react';
 
 interface ProjectArtifactsModalProps {
     isOpen: boolean;
@@ -75,6 +75,17 @@ interface GitResponse {
     status?: GitStatus;
     commits?: GitCommit[];
 }
+
+interface UploadedFile {
+    name: string;
+    path: string;
+    size: number;
+    type: 'image' | 'document' | 'spreadsheet' | 'unknown';
+    createdAt: string;
+    modifiedAt: string;
+}
+
+const ALLOWED_UPLOAD_EXTENSIONS = '.md,.txt,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
 const MARKDOWN_EXTENSIONS = new Set(['md', 'mdx']);
@@ -204,7 +215,7 @@ export function ProjectArtifactsModal({
     projectName,
     projectPath,
 }: ProjectArtifactsModalProps) {
-    const [activeTab, setActiveTab] = useState<'files' | 'sites' | 'git'>('files');
+    const [activeTab, setActiveTab] = useState<'files' | 'sites' | 'git' | 'upload'>('files');
     const [previewOnly, setPreviewOnly] = useState(false);
     const [currentPath, setCurrentPath] = useState('');
     const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -223,6 +234,14 @@ export function ProjectArtifactsModal({
     const [gitCommitMessage, setGitCommitMessage] = useState('');
     const [gitStashMessage, setGitStashMessage] = useState('');
     const [downloading, setDownloading] = useState(false);
+
+    // Upload state
+    const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+    const [uploadLoading, setUploadLoading] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const [dragOver, setDragOver] = useState(false);
+    const [uploadResults, setUploadResults] = useState<{ name: string; success: boolean; error?: string }[]>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const breadcrumbs = useMemo(() => {
         if (!currentPath) {
@@ -337,6 +356,83 @@ export function ProjectArtifactsModal({
         }
     }, [projectId, projectPath]);
 
+    const loadUploadedFiles = useCallback(async () => {
+        if (!projectPath) return;
+        setUploadLoading(true);
+        try {
+            const res = await fetch(`/api/projects/upload?projectPath=${encodeURIComponent(projectPath)}`);
+            const data = await res.json();
+            if (data.files) {
+                setUploadedFiles(data.files);
+            }
+        } catch (err) {
+            console.error('Failed to fetch uploaded files:', err);
+        } finally {
+            setUploadLoading(false);
+        }
+    }, [projectPath]);
+
+    const handleUpload = useCallback(async (fileList: FileList | null) => {
+        if (!fileList || fileList.length === 0 || !projectPath) return;
+        setUploading(true);
+        setUploadResults([]);
+
+        const formData = new FormData();
+        formData.append('projectPath', projectPath);
+        Array.from(fileList).forEach(file => {
+            formData.append('files', file);
+        });
+
+        try {
+            const res = await fetch('/api/projects/upload', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await res.json();
+            if (data.results) {
+                setUploadResults(data.results.map((r: { name: string; success: boolean; error?: string }) => ({
+                    name: r.name,
+                    success: r.success,
+                    error: r.error,
+                })));
+            }
+            await loadUploadedFiles();
+        } catch (err) {
+            console.error('Upload failed:', err);
+            setUploadResults([{ name: 'Upload', success: false, error: 'Upload failed' }]);
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    }, [projectPath, loadUploadedFiles]);
+
+    const handleDeleteUploadedFile = useCallback(async (filename: string) => {
+        if (!projectPath || !confirm(`"${filename}" 파일을 삭제하시겠습니까?`)) return;
+        try {
+            const res = await fetch('/api/projects/upload', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectPath, filename }),
+            });
+            if (res.ok) {
+                await loadUploadedFiles();
+            }
+        } catch (err) {
+            console.error('Delete failed:', err);
+        }
+    }, [projectPath, loadUploadedFiles]);
+
+    const getUploadFileIcon = (type: UploadedFile['type']) => {
+        switch (type) {
+            case 'image': return <Image className="w-5 h-5 text-purple-400" />;
+            case 'document': return <FileText className="w-5 h-5 text-blue-400" />;
+            case 'spreadsheet': return <Table className="w-5 h-5 text-green-400" />;
+            default: return <File className="w-5 h-5 text-gray-400" />;
+        }
+    };
+
     useEffect(() => {
         if (!isOpen || activeTab !== 'sites') return;
         if (projectId) {
@@ -350,6 +446,14 @@ export function ProjectArtifactsModal({
             loadGit();
         }
     }, [activeTab, isOpen, projectId, loadGit]);
+
+    useEffect(() => {
+        if (!isOpen || activeTab !== 'upload') return;
+        if (projectPath) {
+            loadUploadedFiles();
+            setUploadResults([]);
+        }
+    }, [activeTab, isOpen, projectPath, loadUploadedFiles]);
 
     const handleDownloadProject = useCallback(async (downloadPath?: string) => {
         if (!projectPath) return;
@@ -543,6 +647,16 @@ export function ProjectArtifactsModal({
                                             }`}
                                     >
                                         사이트
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('upload')}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${activeTab === 'upload'
+                                            ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                                            }`}
+                                    >
+                                        <Upload className="w-3.5 h-3.5" />
+                                        업로드
                                     </button>
                                 </div>
                             </div>
@@ -1085,6 +1199,121 @@ export function ProjectArtifactsModal({
                                             </div>
                                         )}
                                     </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === 'upload' && (
+                        <div className="p-6">
+                            {!projectPath && (
+                                <div className="text-sm text-[var(--text-muted)]">프로젝트를 먼저 선택해주세요.</div>
+                            )}
+                            {projectPath && (
+                                <div className="space-y-4">
+                                    {/* Upload Area */}
+                                    <div
+                                        className={`
+                                            border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer
+                                            ${dragOver
+                                                ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/10'
+                                                : 'border-[var(--border-secondary)] hover:border-[var(--border-primary)]'
+                                            }
+                                        `}
+                                        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                                        onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
+                                        onDrop={(e) => { e.preventDefault(); setDragOver(false); handleUpload(e.dataTransfer.files); }}
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            multiple
+                                            accept={ALLOWED_UPLOAD_EXTENSIONS}
+                                            className="hidden"
+                                            onChange={(e) => handleUpload(e.target.files)}
+                                        />
+                                        <Upload className="w-10 h-10 mx-auto mb-3 text-[var(--text-muted)]" />
+                                        <p className="text-sm text-[var(--text-primary)] font-medium">
+                                            {uploading ? '업로드 중...' : '파일을 드래그하거나 클릭하여 업로드'}
+                                        </p>
+                                        <p className="text-xs text-[var(--text-muted)] mt-1">
+                                            md, txt, xlsx, xls, csv, 이미지 파일 지원 (최대 50MB)
+                                        </p>
+                                    </div>
+
+                                    {/* Upload Results */}
+                                    {uploadResults.length > 0 && (
+                                        <div className="space-y-1">
+                                            {uploadResults.map((result, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded text-sm ${
+                                                        result.success ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                                                    }`}
+                                                >
+                                                    {result.success ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                                    <span className="flex-1 truncate">{result.name}</span>
+                                                    {result.error && <span className="text-xs opacity-75">{result.error}</span>}
+                                                </div>
+                                            ))}
+                                            <Button variant="ghost" size="sm" onClick={() => setUploadResults([])} className="text-xs">
+                                                결과 닫기
+                                            </Button>
+                                        </div>
+                                    )}
+
+                                    {/* File List */}
+                                    <div className="border border-[var(--border-primary)] rounded-lg overflow-hidden">
+                                        <div className="bg-[var(--bg-tertiary)] px-4 py-2 border-b border-[var(--border-primary)] flex items-center justify-between">
+                                            <h3 className="text-sm font-medium text-[var(--text-secondary)]">
+                                                업로드된 파일 ({uploadedFiles.length})
+                                            </h3>
+                                            <Button variant="ghost" size="sm" onClick={loadUploadedFiles} disabled={uploadLoading}>
+                                                새로고침
+                                            </Button>
+                                        </div>
+
+                                        {uploadLoading ? (
+                                            <div className="p-8 text-center">
+                                                <div className="w-5 h-5 border-2 border-[var(--text-muted)] border-t-transparent rounded-full animate-spin mx-auto" />
+                                            </div>
+                                        ) : uploadedFiles.length === 0 ? (
+                                            <div className="p-8 text-center text-[var(--text-muted)] text-sm">
+                                                업로드된 파일이 없습니다
+                                            </div>
+                                        ) : (
+                                            <div className="max-h-64 overflow-y-auto">
+                                                {uploadedFiles.map((file) => (
+                                                    <div
+                                                        key={file.name}
+                                                        className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-primary)] last:border-0 hover:bg-[var(--bg-tertiary)]"
+                                                    >
+                                                        {getUploadFileIcon(file.type)}
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm text-[var(--text-primary)] truncate">{file.name}</p>
+                                                            <p className="text-xs text-[var(--text-muted)]">
+                                                                {formatBytes(file.size)} · {new Date(file.createdAt).toLocaleDateString()}
+                                                            </p>
+                                                        </div>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => handleDeleteUploadedFile(file.name)}
+                                                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Info */}
+                                    <p className="text-xs text-[var(--text-muted)]">
+                                        📍 파일 저장 위치: {projectPath}/uploads/
+                                    </p>
                                 </div>
                             )}
                         </div>
