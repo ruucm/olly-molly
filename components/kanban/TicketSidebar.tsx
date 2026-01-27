@@ -467,10 +467,10 @@ export function TicketSidebar({
     if (!isOpen || !ticket) return null;
 
     return (
-        <div className="h-full bg-secondary border-l border-primary flex flex-col overflow-hidden">
+        <div className="h-full bg-secondary border-l border-primary flex flex-col overflow-hidden fixed md:relative inset-0 md:inset-auto z-50 md:z-auto">
             {/* Minimal Header */}
             <div
-                className="p-3 border-b border-primary flex items-center justify-between flex-shrink-0 cursor-pointer hover:bg-tertiary/50 transition-colors"
+                className="p-3 md:p-3 border-b border-primary flex items-center justify-between flex-shrink-0 cursor-pointer hover:bg-tertiary/50 transition-colors safe-area-top"
                 onClick={() => setShowTicketDetails(!showTicketDetails)}
             >
                 <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -516,7 +516,7 @@ export function TicketSidebar({
                         rows={2}
                         className="text-sm"
                     />
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                         <Select
                             label="Status"
                             value={status}
@@ -683,9 +683,9 @@ export function TicketSidebar({
                     )}
 
                     {/* Conversations Section - Takes up remaining 90%+ */}
-                    <div className="flex-1 flex min-h-0">
+                    <div className="flex-1 flex flex-col md:flex-row min-h-0">
                         {/* Conversation List */}
-                        <div className="w-56 border-r border-primary overflow-y-auto flex-shrink-0">
+                        <div className="md:w-56 border-b md:border-b-0 md:border-r border-primary overflow-y-auto flex-shrink-0 max-h-32 md:max-h-none">
                             <div className="p-2 bg-tertiary border-b border-primary">
                                 <p className="text-xs font-medium text-muted">Execution History</p>
                             </div>
@@ -697,7 +697,7 @@ export function TicketSidebar({
                         </div>
 
                         {/* Conversation View */}
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 min-h-0">
                             <ConversationView
                                 conversation={selectedConversation}
                                 messages={conversationMessages}

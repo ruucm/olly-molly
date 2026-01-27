@@ -8,6 +8,7 @@ interface ResizablePaneProps {
     defaultLeftWidth?: number;
     minLeftWidth?: number;
     minRightWidth?: number;
+    mobileView?: 'left' | 'right' | 'stack';
 }
 
 export function ResizablePane({
@@ -16,10 +17,22 @@ export function ResizablePane({
     defaultLeftWidth = 60, // percentage
     minLeftWidth = 30,
     minRightWidth = 25,
+    mobileView = 'left',
 }: ResizablePaneProps) {
     const [leftWidth, setLeftWidth] = useState(defaultLeftWidth);
     const [isDragging, setIsDragging] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // Check for mobile
+    useEffect(() => {
+        const checkMobile = () => {
+            setIsMobile(window.innerWidth < 768);
+        };
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
 
     // Update leftWidth when defaultLeftWidth changes
     useEffect(() => {
@@ -67,6 +80,23 @@ export function ResizablePane({
             };
         }
     }, [isDragging, handleMouseMove, handleMouseUp]);
+
+    // Mobile view
+    if (isMobile) {
+        if (mobileView === 'stack') {
+            return (
+                <div ref={containerRef} className="flex flex-col h-full overflow-hidden">
+                    <div className="flex-1 overflow-auto min-h-0">{left}</div>
+                    <div className="flex-1 overflow-auto min-h-0 border-t border-[var(--border-primary)]">{right}</div>
+                </div>
+            );
+        }
+        return (
+            <div ref={containerRef} className="h-full overflow-hidden">
+                {mobileView === 'left' ? left : right}
+            </div>
+        );
+    }
 
     return (
         <div ref={containerRef} className="flex h-full overflow-hidden">

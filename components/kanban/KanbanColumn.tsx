@@ -42,28 +42,31 @@ export function KanbanColumn({ id, title, tickets, color, icon, onTicketClick, r
         <div
             ref={setNodeRef}
             className={`
-                flex-1 min-w-[260px]
-                flex flex-col max-h-[calc(100vh-180px)]
-                border-r border-[var(--border-primary)] last:border-r-0
+                flex-shrink-0 w-[85vw] md:w-auto md:flex-1 md:min-w-[260px]
+                flex flex-col max-h-[calc(100vh-140px)] md:max-h-[calc(100vh-180px)]
+                border border-[var(--border-primary)] md:border-0 md:border-r md:last:border-r-0
+                rounded-lg md:rounded-none
+                bg-[var(--bg-card)] md:bg-transparent
+                snap-center md:snap-align-none
                 transition-colors duration-150
-                ${isOver ? 'bg-[var(--bg-secondary)]' : 'bg-transparent'}
+                ${isOver ? 'bg-[var(--bg-secondary)]' : ''}
             `}
         >
             {/* Column Header */}
-            <div className="px-4 py-3 border-b border-[var(--border-primary)]">
+            <div className="px-3 md:px-4 py-2 md:py-3 border-b border-[var(--border-primary)]">
                 <div className="flex items-center gap-2">
                     <span className="text-sm">{icon}</span>
                     <h3 className={`text-xs font-medium uppercase tracking-wider ${color}`}>
                         {title}
                     </h3>
-                    <span className="ml-auto text-xs text-[var(--text-muted)]">
+                    <span className="ml-auto text-xs text-[var(--text-muted)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
                         {tickets.length}
                     </span>
                 </div>
             </div>
 
             {/* Tickets */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto p-1 md:p-0">
                 <SortableContext items={tickets.map(t => t.id)} strategy={verticalListSortingStrategy}>
                     {tickets.map((ticket) => (
                         <SortableTicket

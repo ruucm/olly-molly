@@ -11,7 +11,7 @@ import { WorkflowCanvas } from '@/components/workflow';
 import { Button } from '@/components/ui/Button';
 import { ResizablePane } from '@/components/ui/ResizablePane';
 import { Icon } from '@/components/ui';
-import { PanelRightClose, PanelRightOpen, Settings, CheckSquare, Square, LayoutDashboard, GitBranch } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Settings, CheckSquare, Square, LayoutDashboard, GitBranch, Menu, X, Plus, FolderOpen, MessageSquare, Users } from 'lucide-react';
 import packageJson from '@/package.json';
 import {
   initClientDb,
@@ -75,6 +75,7 @@ export default function Dashboard() {
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [emailChecked, setEmailChecked] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // View mode state
   const [activeView, setActiveView] = useState<ViewMode>('kanban');
@@ -338,30 +339,107 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
+      {/* Mobile Menu Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Mobile Menu Drawer */}
+      <div className={`
+        fixed top-0 left-0 bottom-0 w-[280px] bg-[var(--bg-primary)] z-50 transform transition-transform duration-300 md:hidden
+        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="flex items-center justify-between p-4 border-b border-[var(--border-primary)]">
+          <div className="flex items-center gap-2">
+            <Image src="/app-icon.png" alt="Olly Molly" width={24} height={24} className="opacity-80" />
+            <span className="font-medium text-[var(--text-primary)]">Olly Molly</span>
+          </div>
+          <button onClick={() => setMobileMenuOpen(false)} className="p-2 text-[var(--text-muted)]">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-4 space-y-2">
+          <div className="mb-4">
+            <ProjectSelector onProjectChange={handleProjectChange} />
+          </div>
+          <button
+            onClick={() => { setActiveView('kanban'); setMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${activeView === 'kanban' ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]'}`}
+          >
+            <LayoutDashboard className="w-5 h-5" /> Kanban
+          </button>
+          <button
+            onClick={() => { setActiveView('workflow'); setMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${activeView === 'workflow' ? 'bg-[var(--accent-primary)] text-[var(--bg-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]'}`}
+          >
+            <GitBranch className="w-5 h-5" /> Workflow
+          </button>
+          <hr className="my-3 border-[var(--border-primary)]" />
+          <button
+            onClick={() => { setArtifactsModalOpen(true); setMobileMenuOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+          >
+            <FolderOpen className="w-5 h-5" /> 파일 탐색
+          </button>
+          <button
+            onClick={() => { setPmModalOpen(true); setMobileMenuOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+          >
+            <MessageSquare className="w-5 h-5" /> PM 요청
+          </button>
+          <button
+            onClick={() => { setSidebarOpen(true); setMobileMenuOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+          >
+            <Users className="w-5 h-5" /> 팀 멤버
+          </button>
+          <hr className="my-3 border-[var(--border-primary)]" />
+          <button
+            onClick={() => { setImageSettingsModalOpen(true); setMobileMenuOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+          >
+            <Settings className="w-5 h-5" /> 설정
+          </button>
+          <div className="px-4 py-2">
+            <ThemeToggle />
+          </div>
+        </div>
+      </div>
+
       {/* Header */}
       <header className="sticky top-0 z-40 bg-[var(--bg-primary)] border-b border-[var(--border-primary)]">
-        <div className="px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="px-2 md:px-4 py-2 flex items-center justify-between">
+          {/* Mobile: Hamburger + Logo */}
+          <div className="flex items-center gap-2 md:gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] md:hidden"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
             <Image
               src="/app-icon.png"
               alt="Olly Molly"
               width={28}
               height={28}
-              className="opacity-80"
+              className="opacity-80 hidden md:block"
             />
-            <h1 className="text-sm font-medium text-[var(--text-primary)]">Olly Molly</h1>
-            <span className="text-[10px] text-[var(--text-muted)]" title={`Version ${appVersion}`}>
+            <h1 className="text-sm font-medium text-[var(--text-primary)] hidden md:block">Olly Molly</h1>
+            <span className="text-[10px] text-[var(--text-muted)] hidden lg:inline" title={`Version ${appVersion}`}>
               v{appVersion}
             </span>
             {runningCount > 0 && (
               <span className="flex items-center gap-1.5 text-xs text-[var(--status-progress-text)]">
                 <span className="w-1.5 h-1.5 bg-[var(--status-progress-text)] rounded-full gentle-pulse" />
-                {runningCount} working
+                <span className="hidden sm:inline">{runningCount} working</span>
               </span>
             )}
 
-            {/* View Mode Tabs */}
-            <div className="flex items-center gap-1 ml-4 bg-[var(--bg-secondary)] rounded-lg p-0.5">
+            {/* View Mode Tabs - Desktop only */}
+            <div className="hidden md:flex items-center gap-1 ml-4 bg-[var(--bg-secondary)] rounded-lg p-0.5">
               <button
                 onClick={() => setActiveView('kanban')}
                 className={`
@@ -390,7 +468,9 @@ export default function Dashboard() {
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          {/* Desktop Actions */}
+          <div className="hidden md:flex items-center gap-2">
             <ProjectSelector onProjectChange={handleProjectChange} />
             <DevServerControl />
             <Button
@@ -471,11 +551,23 @@ export default function Dashboard() {
               <Icon icon={sidebarOpen ? PanelRightClose : PanelRightOpen} />
             </button>
           </div>
+
+          {/* Mobile Actions */}
+          <div className="flex md:hidden items-center gap-1">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCreateTicket}
+              className="!px-3"
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <div className="flex h-[calc(100vh-45px)]">
+      <div className="flex h-[calc(100vh-45px)] md:h-[calc(100vh-45px)]">
         {activeView === 'kanban' ? (
           <ResizablePane
             defaultLeftWidth={ticketSidebarOpen ? 55 : 100}
@@ -548,18 +640,40 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Team Sidebar Backdrop - Mobile */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-30 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
         {/* Team Sidebar */}
         <aside className={`
-          fixed right-0 top-[45px] bottom-0 w-1/2 bg-[var(--bg-secondary)] border-l border-[var(--border-primary)]
-          p-4 transition-transform duration-200 overflow-hidden z-20
+          fixed right-0 top-0 md:top-[45px] bottom-0
+          w-[85vw] max-w-[320px] md:w-1/2 md:max-w-none
+          bg-[var(--bg-secondary)] border-l border-[var(--border-primary)]
+          transition-transform duration-300 overflow-hidden z-40 md:z-20
           ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}
         `}>
-          <TeamPanel
-            members={members}
-            onUpdateMember={handleMemberUpdate}
-            onCreateMember={handleMemberCreate}
-            onDeleteMember={handleMemberDelete}
-          />
+          {/* Mobile Header */}
+          <div className="flex md:hidden items-center justify-between p-4 border-b border-[var(--border-primary)]">
+            <h2 className="text-sm font-medium text-[var(--text-primary)]">팀 멤버</h2>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-4 h-full md:h-auto overflow-y-auto">
+            <TeamPanel
+              members={members}
+              onUpdateMember={handleMemberUpdate}
+              onCreateMember={handleMemberCreate}
+              onDeleteMember={handleMemberDelete}
+            />
+          </div>
         </aside>
       </div>
 

@@ -189,14 +189,14 @@ export function KanbanBoard({
     return (
         <div className="flex flex-col h-full relative">
             {/* Board */}
-            <div className="flex-1 flex border-t border-[var(--border-primary)]">
+            <div className="flex-1 flex border-t border-[var(--border-primary)] overflow-hidden">
                 <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
                     onDragStart={handleDragStart}
                     onDragEnd={handleDragEnd}
                 >
-                    <div className="flex gap-4 overflow-x-auto pb-4">
+                    <div className="flex gap-2 md:gap-4 overflow-x-auto pb-4 px-2 md:px-4 pt-2 md:pt-4 snap-x snap-mandatory md:snap-none">
                         {columns.map((column) => (
                             <KanbanColumn
                                 key={column.id}

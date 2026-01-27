@@ -604,26 +604,27 @@ export function ProjectArtifactsModal({
         <Modal isOpen={isOpen} onClose={onClose} title={modalTitle} size="full">
             <div className="h-full flex flex-col">
                 {!previewOnly && (
-                    <div className="px-6 py-4 border-b border-[var(--border-primary)] space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs text-[var(--text-muted)]">
+                    <div className="px-4 md:px-6 py-3 md:py-4 border-b border-[var(--border-primary)] space-y-3">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <div className="text-xs text-[var(--text-muted)] truncate">
                                 {projectName && <span className="text-[var(--text-secondary)]">{projectName}</span>}
-                                {projectPath && <span className="ml-2">{projectPath}</span>}
+                                {projectPath && <span className="ml-2 hidden md:inline">{projectPath}</span>}
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 overflow-x-auto">
                                 {activeTab === 'files' && selectedFile && (
                                     <Button
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => setPreviewOnly(true)}
+                                        className="flex-shrink-0"
                                     >
                                         프리뷰만
                                     </Button>
                                 )}
-                                <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
+                                <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg flex-shrink-0">
                                     <button
                                         onClick={() => setActiveTab('files')}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'files'
+                                        className={`px-2 md:px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'files'
                                             ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
                                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                                             }`}
@@ -632,7 +633,7 @@ export function ProjectArtifactsModal({
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('git')}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'git'
+                                        className={`px-2 md:px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'git'
                                             ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
                                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                                             }`}
@@ -641,7 +642,7 @@ export function ProjectArtifactsModal({
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('sites')}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'sites'
+                                        className={`px-2 md:px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'sites'
                                             ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
                                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                                             }`}
@@ -650,13 +651,13 @@ export function ProjectArtifactsModal({
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('upload')}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${activeTab === 'upload'
+                                        className={`px-2 md:px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${activeTab === 'upload'
                                             ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
                                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                                             }`}
                                     >
                                         <Upload className="w-3.5 h-3.5" />
-                                        업로드
+                                        <span className="hidden md:inline">업로드</span>
                                     </button>
                                 </div>
                             </div>

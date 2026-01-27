@@ -50,9 +50,11 @@ export function TicketCard({ ticket, onClick, isDragging, isRunning, isSelected,
         <div
             onClick={onClick}
             className={`
-                px-4 py-3 border-b border-[var(--border-primary)] cursor-pointer
+                px-3 md:px-4 py-3 md:py-3 border-b border-[var(--border-primary)] cursor-pointer
                 transition-colors duration-150
                 hover:bg-[var(--bg-secondary)]
+                active:bg-[var(--bg-tertiary)]
+                touch-manipulation
                 ${isDragging ? 'opacity-50 bg-[var(--bg-secondary)]' : ''}
                 ${isRunning ? 'bg-[var(--status-progress)]/30' : ''}
                 ${isSelected ? 'bg-indigo-500/10 border-l-2 border-l-indigo-500' : ''}
