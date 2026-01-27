@@ -38,8 +38,8 @@ export function TeamPanel({ members, onUpdateMember, onCreateMember, onDeleteMem
     };
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="mb-4">
+        <div className="h-full flex flex-col min-h-0">
+            <div className="mb-4 flex-shrink-0">
                 <div className="flex items-center justify-between mb-2">
                     <h2 className="text-lg font-semibold text-[var(--text-primary)]">Team Members</h2>
                     <Button
@@ -53,7 +53,7 @@ export function TeamPanel({ members, onUpdateMember, onCreateMember, onDeleteMem
                 <p className="text-sm text-[var(--text-tertiary)]">Click to edit system prompts</p>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto">
+            <div className="flex-1 space-y-3 overflow-y-auto min-h-0">
                 {members.map((member) => (
                     <MemberCard
                         key={member.id}

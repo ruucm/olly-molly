@@ -685,11 +685,12 @@ export default function Dashboard() {
           fixed right-0 top-0 md:top-[45px] bottom-0
           w-[85vw] max-w-[320px] md:w-1/2 md:max-w-none
           bg-[var(--bg-secondary)] border-l border-[var(--border-primary)]
-          transition-transform duration-300 overflow-hidden z-40 md:z-20
+          transition-transform duration-300 z-40 md:z-20
+          flex flex-col
           ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}
         `}>
           {/* Mobile Header */}
-          <div className="flex md:hidden items-center justify-between p-4 border-b border-[var(--border-primary)]">
+          <div className="flex md:hidden items-center justify-between p-4 border-b border-[var(--border-primary)] flex-shrink-0">
             <h2 className="text-sm font-medium text-[var(--text-primary)]">팀 멤버</h2>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -698,7 +699,7 @@ export default function Dashboard() {
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="p-4 h-full md:h-auto overflow-y-auto">
+          <div className="p-4 flex-1 overflow-y-auto min-h-0">
             <TeamPanel
               members={members}
               onUpdateMember={handleMemberUpdate}
