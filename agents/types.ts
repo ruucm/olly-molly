@@ -52,6 +52,36 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'testing',
       tags: ['debugging', 'bug-fixing', 'code-review'],
     },
+    UI_ARCHITECT: {
+      description: 'Tailwind CSS 전문가로 index.html만 작성하는 UI/UX 아키텍트입니다.',
+      category: 'development',
+      tags: ['html', 'tailwind', 'css', 'ui', 'markup'],
+    },
+    INTERACTION_DEV: {
+      description: 'client.js 전담 클라이언트 사이드 JavaScript 개발자입니다.',
+      category: 'development',
+      tags: ['javascript', 'client', 'dom', 'frontend'],
+    },
+    VERCEL_AGENT: {
+      description: 'Vercel 배포 자동화 및 최적화를 담당하는 에이전트입니다.',
+      category: 'operations',
+      tags: ['vercel', 'deployment', 'hosting', 'ci-cd'],
+    },
+    SIMPLE_BACKEND: {
+      description: 'server.js 전담 Node.js 백엔드 개발자입니다.',
+      category: 'development',
+      tags: ['node.js', 'express', 'backend', 'api', 'server'],
+    },
+    DB_SQLITE: {
+      description: 'SQLite 데이터베이스 설계, 관리 및 시각화 전문가입니다.',
+      category: 'development',
+      tags: ['sqlite', 'database', 'sql', 'schema', 'erd'],
+    },
+    DB_POSTGRESQL: {
+      description: 'PostgreSQL 데이터베이스 설계, 관리 및 시각화 전문가입니다.',
+      category: 'development',
+      tags: ['postgresql', 'database', 'sql', 'schema', 'erd'],
+    },
   };
 
   return metadata[role] || {

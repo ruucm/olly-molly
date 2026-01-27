@@ -34,6 +34,12 @@ import { beDevAgent } from './be-dev';
 import { qaAgent } from './qa';
 import { devopsAgent } from './devops';
 import { bugHunterAgent } from './bug-hunter';
+import { uiArchitectAgent } from './ui-architect';
+import { interactionDevAgent } from './interaction-dev';
+import { vercelAgent } from './vercel-agent';
+import { simpleBackendAgent } from './simple-backend';
+import { dbSqliteAgent } from './db-sqlite';
+import { dbPostgresqlAgent } from './db-postgresql';
 
 import type { AgentDefinition } from './types';
 
@@ -44,6 +50,12 @@ export { beDevAgent } from './be-dev';
 export { qaAgent } from './qa';
 export { devopsAgent } from './devops';
 export { bugHunterAgent } from './bug-hunter';
+export { uiArchitectAgent } from './ui-architect';
+export { interactionDevAgent } from './interaction-dev';
+export { vercelAgent } from './vercel-agent';
+export { simpleBackendAgent } from './simple-backend';
+export { dbSqliteAgent } from './db-sqlite';
+export { dbPostgresqlAgent } from './db-postgresql';
 
 /**
  * Array of all default agents.
@@ -56,4 +68,10 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   qaAgent,
   devopsAgent,
   bugHunterAgent,
+  uiArchitectAgent,
+  interactionDevAgent,
+  vercelAgent,
+  simpleBackendAgent,
+  dbSqliteAgent,
+  dbPostgresqlAgent,
 ];

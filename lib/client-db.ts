@@ -675,11 +675,19 @@ export function initClientDb(): Promise<void> {
       marketAgentsCollection.preload(),
     ]);
 
-    // Seed market agents from DEFAULT_AGENTS if market is empty
-    if (marketAgentsCollection.size === 0) {
+    // Sync builtin agents: add new ones from DEFAULT_AGENTS that aren't in market yet
+    const existingIds = new Set(
+      Array.from(marketAgentsCollection.values())
+        .filter((a) => a.is_builtin === 1)
+        .map((a) => a.id)
+    );
+
+    const newBuiltinAgents = DEFAULT_AGENTS.filter((agent) => !existingIds.has(agent.id));
+
+    if (newBuiltinAgents.length > 0) {
       const now = new Date().toISOString();
       marketAgentsCollection.insert(
-        DEFAULT_AGENTS.map((agent) => {
+        newBuiltinAgents.map((agent) => {
           const metadata = getAgentMetadata(agent.role);
           return {
             ...agent,
