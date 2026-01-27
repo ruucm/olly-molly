@@ -23,8 +23,24 @@ export function CLIWarningModal({ isOpen, onClose }: CLIWarningModalProps) {
         }
     }, []);
 
-    const copyToClipboard = (text: string) => {
-        navigator.clipboard.writeText(text);
+    const copyToClipboard = async (text: string) => {
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                // Fallback for HTTP
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-9999px';
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+        } catch {
+            console.warn('Failed to copy to clipboard');
+        }
     };
 
     const installCommands = {
