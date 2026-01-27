@@ -13,9 +13,9 @@ npm install
 echo "Building Next.js..."
 npm run build
 
-# Find the actual standalone app directory (Next.js mirrors full path)
-STANDALONE_APP_DIR=$(find "${ROOT_DIR}/.next/standalone" -name "server.js" -path "*/standalone/*/server.js" ! -path "*/node_modules/*" -exec dirname {} \; | head -1)
-if [[ -z "${STANDALONE_APP_DIR}" ]]; then
+# Find the actual standalone app directory
+STANDALONE_APP_DIR="${ROOT_DIR}/.next/standalone"
+if [[ ! -f "${STANDALONE_APP_DIR}/server.js" ]]; then
   echo "Error: Could not find server.js in standalone output"
   exit 1
 fi
