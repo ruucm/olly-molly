@@ -418,7 +418,9 @@ export function startBackgroundJob(params: StartJobParams): void {
     }
 
     // Set required vars
-    spawnEnv.PORT = '3001';
+    // NOTE: Do NOT hardcode PORT here - it causes conflicts when multiple agents run
+    // or when the target project's server is already using that port.
+    // Let agents find available ports dynamically.
     spawnEnv.NODE_ENV = 'development';
 
     // For OpenCode, set permission to allow all to skip interactive prompts

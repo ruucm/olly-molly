@@ -44,7 +44,7 @@ function buildAgentPrompt(ticket: {
     const isQA = agent.role === 'QA';
     const qaInstruction = isQA
         ? `\nIMPORTANT:
-1. PORT CONFIGURATION: When running tests or starting servers for the TARGET PROJECT.
+1. PORT CONFIGURATION: When running tests or starting servers, use a DYNAMIC PORT. Check ports in range 3001-3999 and use the first available one. Do NOT hardcode any specific port as it may conflict with other agents or servers.
 2. TOOL USAGE: You MUST use the **Playwright MCP** (https://github.com/microsoft/playwright-mcp) tools for automated testing. verify the available tools and use them for browser automation and testing. Do NOT rely solely on manual terminal commands.`
         : '';
 
@@ -67,10 +67,11 @@ If you need images for your implementation (backgrounds, icons, illustrations, e
     const screenshotInstruction = canLogScreenshots
         ? `\n\nSCREENSHOT REQUIREMENT:
 If you make any UI/visual changes, you MUST take screenshots to document your work:
-1. Start the dev server on port 3001. Prefer an explicit CLI arg when available:
-   - Next.js: "npm run dev -- --port 3001" (or "next dev -p 3001")
-   - Vite: "npm run dev -- --port 3001"
-   - If the tool only supports env vars: set PORT=3001 using the shell's syntax (Windows PowerShell/CMD differs from bash)
+1. Start the dev server using a DYNAMIC PORT. First check if any port is already in use, then pick an available one from range 3001-3999:
+   - Check port availability: lsof -i :PORT_NUMBER (macOS/Linux) or netstat -ano | findstr :PORT_NUMBER (Windows)
+   - Next.js: "npm run dev -- --port PORT_NUMBER" (or "next dev -p PORT_NUMBER")
+   - Vite: "npm run dev -- --port PORT_NUMBER"
+   - IMPORTANT: If a port is already in use, try the next one. Do NOT kill existing processes using that port.
 2. Use browser automation tools (Playwright MCP or similar) to capture screenshots
 3. Save screenshots to the ".agent-screenshots/" folder in the project root
 4. Name files descriptively (e.g., "feature-result.png", "bug-fix-result.png")
@@ -102,7 +103,7 @@ INSTRUCTIONS:
 4. Write clean, well-documented code
 5. After completing, provide a brief summary of changes made
 6. COMMIT REQUIREMENT (MANDATORY): If you made any code or file changes, you MUST create a git commit before finishing. Do not skip this step unless there are truly no changes to commit.
-7. CRITICAL: You are working on the external project "${project.name}". When starting its server, ALWAYS use port 3001. Prefer "npm run dev -- --port 3001" when supported. NEVER use port 1234.${qaInstruction}${imageGenerationInstruction}${screenshotInstruction}
+7. CRITICAL: You are working on the external project "${project.name}". When starting its server, use a DYNAMIC PORT (not 1234 which is used by Olly Molly). Check if ports in range 3001-3999 are available and use the first free one. Prefer "npm run dev -- --port PORT" when supported.${qaInstruction}${imageGenerationInstruction}${screenshotInstruction}
 
 Please complete this task now.`;
 }
