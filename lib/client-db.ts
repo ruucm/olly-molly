@@ -2,6 +2,11 @@
 
 import { openDB, type IDBPDatabase } from 'idb';
 import { v4 as uuidv4 } from 'uuid';
+
+// Polyfill crypto.randomUUID for non-secure contexts (HTTP external access)
+if (typeof window !== 'undefined' && typeof crypto !== 'undefined' && !crypto.randomUUID) {
+  crypto.randomUUID = () => uuidv4() as `${string}-${string}-${string}-${string}-${string}`;
+}
 import {
   createCollection,
   useLiveQuery,
