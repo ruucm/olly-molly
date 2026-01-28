@@ -3,6 +3,13 @@
 import { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import { Button } from './Button';
+import {
+    getNotificationSettings,
+    saveNotificationSettings,
+    type NotificationSettings,
+} from '@/lib/notification-settings';
+
+type SettingsTab = 'image' | 'notification';
 
 export interface ImageGeneratorSettings {
     provider: 'comfyui' | 'nanobanana' | 'off';
@@ -67,16 +74,41 @@ interface ImageSettingsModalProps {
 }
 
 export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps) {
+    const [activeTab, setActiveTab] = useState<SettingsTab>('image');
     const [settings, setSettings] = useState<ImageGeneratorSettings>(defaultSettings);
     const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
     const [testMessage, setTestMessage] = useState('');
     const [saving, setSaving] = useState(false);
+
+    // Notification settings
+    const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
+        browserEnabled: true,
+        emailEnabled: false,
+        emailAddress: '',
+    });
+    const [emailConfigured, setEmailConfigured] = useState<boolean | null>(null);
+    const [fromEmail, setFromEmail] = useState<string | undefined>();
 
     useEffect(() => {
         if (isOpen) {
             loadImageSettingsFromServer().then(setSettings);
             setTestStatus('idle');
             setTestMessage('');
+
+            // Load notification settings
+            const notifSettings = getNotificationSettings();
+            setNotificationSettings(notifSettings);
+
+            // Check if email is configured on server
+            fetch('/api/notification/settings')
+                .then((res) => res.json())
+                .then((data) => {
+                    setEmailConfigured(data.email?.configured || false);
+                    setFromEmail(data.email?.fromEmail);
+                })
+                .catch(() => {
+                    setEmailConfigured(false);
+                });
         }
     }, [isOpen]);
 
@@ -84,6 +116,7 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
         setSaving(true);
         try {
             await saveImageSettings(settings);
+            saveNotificationSettings(notificationSettings);
             onClose();
         } catch (error) {
             console.error('Failed to save settings:', error);
@@ -136,8 +169,35 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="🖼️ 이미지 생성 설정" size="md">
+        <Modal isOpen={isOpen} onClose={onClose} title="⚙️ 설정" size="md">
             <div className="space-y-6">
+                {/* Tabs */}
+                <div className="flex border-b border-[var(--border-primary)]">
+                    <button
+                        onClick={() => setActiveTab('image')}
+                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                            activeTab === 'image'
+                                ? 'border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                        }`}
+                    >
+                        🖼️ 이미지 생성
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('notification')}
+                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                            activeTab === 'notification'
+                                ? 'border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                        }`}
+                    >
+                        🔔 알림
+                    </button>
+                </div>
+
+                {/* Image Settings Tab */}
+                {activeTab === 'image' && (
+                    <>
                 {/* Provider Selection */}
                 <div>
                     <label className="block text-xs font-medium text-[var(--text-secondary)] mb-3">
@@ -252,6 +312,104 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
                             <p className="mt-2 text-xs text-red-500">{testMessage}</p>
                         )}
                     </div>
+                )}
+                    </>
+                )}
+
+                {/* Notification Settings Tab */}
+                {activeTab === 'notification' && (
+                    <>
+                        {/* Browser Notifications */}
+                        <div>
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={notificationSettings.browserEnabled}
+                                    onChange={(e) =>
+                                        setNotificationSettings({
+                                            ...notificationSettings,
+                                            browserEnabled: e.target.checked,
+                                        })
+                                    }
+                                    className="w-4 h-4"
+                                />
+                                <div>
+                                    <div className="text-sm font-medium text-[var(--text-primary)]">
+                                        브라우저 알림
+                                    </div>
+                                    <div className="text-xs text-[var(--text-muted)]">
+                                        작업 완료 시 브라우저 알림 표시
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        {/* Email Notifications */}
+                        <div className="pt-4 border-t border-[var(--border-primary)]">
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={notificationSettings.emailEnabled}
+                                    onChange={(e) =>
+                                        setNotificationSettings({
+                                            ...notificationSettings,
+                                            emailEnabled: e.target.checked,
+                                        })
+                                    }
+                                    className="w-4 h-4"
+                                    disabled={!emailConfigured}
+                                />
+                                <div>
+                                    <div className="text-sm font-medium text-[var(--text-primary)]">
+                                        이메일 알림
+                                    </div>
+                                    <div className="text-xs text-[var(--text-muted)]">
+                                        작업 완료 시 이메일 발송 (AWS SES)
+                                    </div>
+                                </div>
+                            </label>
+
+                            {emailConfigured === false && (
+                                <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded">
+                                    <p className="text-xs text-amber-500">
+                                        이메일 알림을 사용하려면 서버 환경변수를 설정하세요:
+                                    </p>
+                                    <pre className="mt-2 text-[10px] text-[var(--text-muted)] font-mono">
+{`AWS_REGION=ap-northeast-2
+AWS_ACCESS_KEY_ID=your-key
+AWS_SECRET_ACCESS_KEY=your-secret
+SES_FROM_EMAIL=noreply@yourdomain.com`}
+                                    </pre>
+                                </div>
+                            )}
+
+                            {emailConfigured && fromEmail && (
+                                <p className="mt-2 text-xs text-green-500">
+                                    ✓ 이메일 설정됨 (발신: {fromEmail})
+                                </p>
+                            )}
+
+                            {notificationSettings.emailEnabled && emailConfigured && (
+                                <div className="mt-3">
+                                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-2">
+                                        수신 이메일 주소
+                                    </label>
+                                    <input
+                                        type="email"
+                                        value={notificationSettings.emailAddress}
+                                        onChange={(e) =>
+                                            setNotificationSettings({
+                                                ...notificationSettings,
+                                                emailAddress: e.target.value,
+                                            })
+                                        }
+                                        placeholder="your@email.com"
+                                        className="w-full px-3 py-2 text-sm bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--border-accent)]"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </>
                 )}
 
                 {/* Actions */}

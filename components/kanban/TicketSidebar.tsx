@@ -18,6 +18,40 @@ import {
     type Conversation,
 } from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
+import { getNotificationSettings } from '@/lib/notification-settings';
+
+// Send email notification for task completion
+async function sendEmailNotification(params: {
+    agentName: string;
+    agentRole: string;
+    ticketTitle: string;
+    ticketId: string;
+    projectName: string;
+    commitHash?: string;
+}) {
+    const settings = getNotificationSettings();
+    if (!settings.emailEnabled || !settings.emailAddress) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notification/email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: settings.emailAddress,
+                ...params,
+            }),
+        });
+
+        if (!response.ok) {
+            const data = await response.json();
+            console.error('Failed to send email notification:', data.error);
+        }
+    } catch (error) {
+        console.error('Failed to send email notification:', error);
+    }
+}
 
 function stripAnsi(input: string): string {
     return input
@@ -297,11 +331,24 @@ export function TicketSidebar({
                         if (firstAssignee) {
                             const agentName = firstAssignee.name;
                             const agentIcon = roleProfileImages[firstAssignee.role] || '/app-icon.png';
+
+                            // Browser notification
                             showNotification(
                                 `✅ ${agentName} 작업 완료!`,
                                 `"${ticket.title}" 작업이 완료되어 리뷰 대기 중입니다.`,
                                 agentIcon,
                             );
+
+                            // Email notification
+                            const project = projectService.getActive();
+                            sendEmailNotification({
+                                agentName,
+                                agentRole: firstAssignee.role,
+                                ticketTitle: ticket.title,
+                                ticketId: ticket.id,
+                                projectName: project?.name || 'Unknown Project',
+                                commitHash,
+                            });
                         }
                     }
 
