@@ -6,8 +6,9 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
-import { memberService, ticketService, useProjects, useMembers } from '@/lib/client-db';
+import { memberService, ticketService, workflowService, workflowNodeService, workflowEdgeService, useProjects, useMembers } from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
+import { executeWorkflow } from '@/lib/workflow-executor';
 
 interface TeamMember {
     id: string;
@@ -49,7 +50,11 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         message: string;
         summary?: string;
         tickets: CreatedTicket[];
+        workflowId?: string;
+        workflowName?: string;
     } | null>(null);
+    const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
+    const [workflowStatus, setWorkflowStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
     const [answer, setAnswer] = useState<string | null>(null);
     const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
@@ -161,11 +166,52 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                     });
                 }
 
+                // Create workflow from the created tickets
+                let workflowId: string | undefined;
+                let workflowName: string | undefined;
+                if (createdTickets.length > 0 && projectId) {
+                    // Generate workflow name from request (first 30 chars)
+                    const requestSummary = request.trim().slice(0, 30) + (request.trim().length > 30 ? '...' : '');
+                    workflowName = `PM: ${requestSummary}`;
+
+                    // Create workflow
+                    const workflow = workflowService.create({
+                        name: workflowName,
+                        description: `Auto-generated workflow from PM request: ${request.trim()}`,
+                        project_id: projectId,
+                    });
+                    workflowId = workflow.id;
+
+                    // Create nodes for each ticket and connect them sequentially
+                    const nodeIds: string[] = [];
+                    for (let i = 0; i < createdTickets.length; i++) {
+                        const node = workflowNodeService.create({
+                            workflow_id: workflow.id,
+                            ticket_id: createdTickets[i].id,
+                            position_x: 100 + (i * 250), // Horizontal layout
+                            position_y: 200,
+                        });
+                        nodeIds.push(node.id);
+                    }
+
+                    // Create edges to connect nodes sequentially
+                    for (let i = 0; i < nodeIds.length - 1; i++) {
+                        workflowEdgeService.create({
+                            workflow_id: workflow.id,
+                            source_node_id: nodeIds[i],
+                            target_node_id: nodeIds[i + 1],
+                        });
+                    }
+                }
+
                 setResult({
                     message: data.message || `PM이 AI를 사용해 "${request.trim()}" 요청을 분석하여 ${createdTickets.length}개의 태스크를 생성했습니다.`,
                     summary: data.ai_summary,
                     tickets: createdTickets,
+                    workflowId,
+                    workflowName,
                 });
+                setWorkflowStatus('idle');
                 onTicketsCreated();
             }
         } catch (err) {
@@ -215,7 +261,52 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         setResult(null);
         setAnswer(null);
         setError(null);
+        setWorkflowStatus('idle');
+        setIsExecutingWorkflow(false);
         onClose();
+    };
+
+    const handleExecuteWorkflow = async () => {
+        if (!result?.workflowId || !projectId) return;
+
+        setIsExecutingWorkflow(true);
+        setWorkflowStatus('running');
+
+        try {
+            // Get first assignable member as default agent
+            const defaultAgent = assignableMembers[0];
+            if (!defaultAgent) {
+                setError('No assignable members available to execute workflow');
+                setWorkflowStatus('failed');
+                setIsExecutingWorkflow(false);
+                return;
+            }
+
+            const success = await executeWorkflow(result.workflowId, {
+                projectId,
+                defaultAgentId: defaultAgent.id,
+                provider,
+                onNodeStart: (nodeId) => {
+                    console.log('[PMRequestModal] Node started:', nodeId);
+                },
+                onNodeComplete: (nodeId, nodeSuccess) => {
+                    console.log('[PMRequestModal] Node completed:', nodeId, nodeSuccess);
+                },
+                onWorkflowComplete: (workflowSuccess) => {
+                    setWorkflowStatus(workflowSuccess ? 'completed' : 'failed');
+                    setIsExecutingWorkflow(false);
+                },
+            });
+
+            if (!success) {
+                setWorkflowStatus('failed');
+            }
+        } catch (err) {
+            console.error('[PMRequestModal] Workflow execution error:', err);
+            setError(err instanceof Error ? err.message : 'Workflow execution failed');
+            setWorkflowStatus('failed');
+            setIsExecutingWorkflow(false);
+        }
     };
 
     const roleColors: Record<string, 'info' | 'success' | 'warning' | 'default'> = {
@@ -425,6 +516,51 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                     </div>
                                 ))}
                             </div>
+
+                            {/* Workflow Info */}
+                            {result.workflowId && (
+                                <div className="p-4 bg-[var(--bg-tertiary)] rounded-lg border border-[var(--border-primary)]">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-2">
+                                                ⚡ Workflow 생성됨
+                                                {workflowStatus === 'running' && (
+                                                    <span className="text-amber-400 text-xs">실행 중...</span>
+                                                )}
+                                                {workflowStatus === 'completed' && (
+                                                    <span className="text-emerald-400 text-xs">✅ 완료</span>
+                                                )}
+                                                {workflowStatus === 'failed' && (
+                                                    <span className="text-red-400 text-xs">❌ 실패</span>
+                                                )}
+                                            </p>
+                                            <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                                                {result.workflowName}
+                                            </p>
+                                        </div>
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={handleExecuteWorkflow}
+                                            disabled={isExecutingWorkflow || workflowStatus === 'completed'}
+                                        >
+                                            {isExecutingWorkflow ? (
+                                                <>
+                                                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                                                    실행 중...
+                                                </>
+                                            ) : workflowStatus === 'completed' ? (
+                                                '✅ 완료됨'
+                                            ) : (
+                                                '▶️ Workflow 실행'
+                                            )}
+                                        </Button>
+                                    </div>
+                                    <p className="text-xs text-[var(--text-muted)] mt-2">
+                                        {result.tickets.length}개의 태스크가 순서대로 자동 실행됩니다.
+                                    </p>
+                                </div>
+                            )}
 
                             <div className="flex justify-end">
                                 <Button variant="primary" onClick={handleClose}>확인</Button>
