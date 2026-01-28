@@ -40,6 +40,7 @@ import { vercelAgent } from './vercel-agent';
 import { simpleBackendAgent } from './simple-backend';
 import { dbSqliteAgent } from './db-sqlite';
 import { dbPostgresqlAgent } from './db-postgresql';
+import { githubAgent } from './github-agent';
 
 import type { AgentDefinition } from './types';
 
@@ -56,6 +57,7 @@ export { vercelAgent } from './vercel-agent';
 export { simpleBackendAgent } from './simple-backend';
 export { dbSqliteAgent } from './db-sqlite';
 export { dbPostgresqlAgent } from './db-postgresql';
+export { githubAgent } from './github-agent';
 
 /**
  * Array of all default agents.
@@ -74,4 +76,5 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   simpleBackendAgent,
   dbSqliteAgent,
   dbPostgresqlAgent,
+  githubAgent,
 ];

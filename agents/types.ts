@@ -82,6 +82,11 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'development',
       tags: ['postgresql', 'database', 'sql', 'schema', 'erd'],
     },
+    GITHUB_AGENT: {
+      description: 'GitHub 레포지토리 관리 및 동기화를 담당하는 에이전트입니다.',
+      category: 'operations',
+      tags: ['github', 'git', 'repository', 'sync', 'version-control'],
+    },
   };
 
   return metadata[role] || {
