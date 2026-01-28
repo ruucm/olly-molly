@@ -193,7 +193,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                         const node = workflowNodeService.create({
                             workflow_id: workflow.id,
                             ticket_id: createdTickets[i].id,
-                            position_x: 100 + (i * 250), // Horizontal layout
+                            position_x: 100 + (i * 350), // Horizontal layout with wider spacing
                             position_y: 200,
                         });
                         nodeIds.push(node.id);
