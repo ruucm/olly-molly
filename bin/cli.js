@@ -88,6 +88,12 @@ ENVIRONMENT VARIABLES
   OLLY_MOLLY_DATA_DIR     App data directory (fallback)
   OLLY_MOLLY_DB_PATH      Database path (fallback)
 
+  You can also create ~/.olly-molly/.env file:
+    AWS_REGION=ap-northeast-2
+    AWS_ACCESS_KEY_ID=your-key
+    AWS_SECRET_ACCESS_KEY=your-secret
+    SES_FROM_EMAIL=noreply@example.com
+
 EXAMPLES
   olly-molly                          # Start with defaults
   olly-molly -p 3000                  # Use port 3000
@@ -108,11 +114,43 @@ if (args.version) {
     process.exit(0);
 }
 
+// Load .env file from data directory
+function loadEnvFile(dataDir) {
+    const envPath = path.join(dataDir, '.env');
+    if (!fs.existsSync(envPath)) return;
+
+    try {
+        const content = fs.readFileSync(envPath, 'utf8');
+        for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const eqIndex = trimmed.indexOf('=');
+            if (eqIndex === -1) continue;
+            const key = trimmed.slice(0, eqIndex).trim();
+            let value = trimmed.slice(eqIndex + 1).trim();
+            // Remove quotes if present
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+            }
+            // Only set if not already defined (CLI/system env takes priority)
+            if (!process.env[key]) {
+                process.env[key] = value;
+            }
+        }
+    } catch (err) {
+        // Silently ignore read errors
+    }
+}
+
 // Configuration with priority: CLI args > env vars > defaults
 function getConfig() {
     const dataDir = args['data-dir']
         || process.env.OLLY_MOLLY_DATA_DIR
         || path.join(os.homedir(), '.olly-molly');
+
+    // Load .env from data directory
+    loadEnvFile(dataDir);
 
     const port = args.port
         || process.env.OLLY_MOLLY_PORT
