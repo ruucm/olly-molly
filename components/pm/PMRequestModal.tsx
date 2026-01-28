@@ -145,7 +145,11 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
 
             if (data.success) {
                 const createdTickets: CreatedTicket[] = [];
-                for (const task of data.tasks || []) {
+                const tasks = data.tasks || [];
+                // Use base timestamp and increment to ensure correct ordering
+                const baseOrderIndex = Date.now();
+                for (let i = 0; i < tasks.length; i++) {
+                    const task = tasks[i];
                     const assigneeId = memberService.getByRole(task.assignee_role)?.id || null;
                     const ticket = ticketService.create({
                         title: task.title,
@@ -154,6 +158,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                         assignee_ids: assigneeId ? [assigneeId] : [],
                         project_id: projectId,
                         created_by: memberService.getByRole('PM')?.id || undefined,
+                        order_index: baseOrderIndex + i, // Ensure sequential ordering
                     });
                     const assignee = assigneeId ? memberService.getById(assigneeId) : undefined;
                     createdTickets.push({

@@ -966,7 +966,7 @@ export const ticketService = {
       });
     });
   },
-  create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_ids?: string[]; project_id?: string; created_by?: string }): Ticket {
+  create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_ids?: string[]; project_id?: string; created_by?: string; order_index?: number }): Ticket {
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: uuidv4(),
@@ -977,7 +977,7 @@ export const ticketService = {
       assignee_ids: data.assignee_ids || [],
       project_id: data.project_id || null,
       created_by: data.created_by || null,
-      order_index: Date.now(),
+      order_index: data.order_index ?? Date.now(),
       created_at: now,
       updated_at: now,
     };
