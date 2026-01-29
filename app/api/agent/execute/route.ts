@@ -180,8 +180,8 @@ export async function POST(request: NextRequest) {
             provider,
         });
 
-        // Start background job (non-blocking)
-        startBackgroundJob({
+        // Start background job (find available port first, then run non-blocking)
+        await startBackgroundJob({
             jobId,
             conversationId,
             ticketId: ticket.id,

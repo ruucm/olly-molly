@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import net from 'net';
 
 export type AgentProvider = 'claude' | 'opencode' | 'codex';
 
@@ -20,6 +21,44 @@ const CLAUDE_MODEL_ENV_KEYS = ['CLAUDE_MODEL', 'CLAUDE_CODE_MODEL', 'ANTHROPIC_M
 const OPENCODE_MODEL_ENV_KEYS = ['OPENCODE_MODEL', 'OPENCODE_DEFAULT_MODEL'];
 const CODEX_MODEL_ENV_KEYS = ['CODEX_MODEL', 'CODEX_DEFAULT_MODEL', 'OPENAI_MODEL', 'OPENAI_DEFAULT_MODEL'];
 const CODEX_ARGS_ENV_KEY = 'CODEX_CLI_ARGS';
+
+// Reserved ports that agents should never use (Olly Molly app ports)
+const RESERVED_PORTS = [1234, 3000];
+
+/**
+ * Find an available port starting from the given port
+ * Skips reserved ports to avoid conflicts with Olly Molly
+ */
+async function findAvailablePort(startPort = 3001): Promise<number> {
+    const tryPort = (port: number): Promise<number> => {
+        return new Promise((resolve) => {
+            // Skip reserved ports
+            if (RESERVED_PORTS.includes(port)) {
+                resolve(tryPort(port + 1));
+                return;
+            }
+
+            const server = net.createServer();
+            server.listen(port, '127.0.0.1', () => {
+                server.close(() => resolve(port));
+            });
+            server.on('error', () => {
+                resolve(tryPort(port + 1));
+            });
+        });
+    };
+    return tryPort(startPort);
+}
+
+// Common instructions prepended to all agent prompts
+const PORT_SAFETY_INSTRUCTIONS = `
+⚠️ 중요: 포트 사용 규칙
+- localhost:1234는 Olly Molly 앱이 사용 중입니다. 절대 건드리지 마세요!
+- dev 서버 실행 시 환경변수 AVAILABLE_PORT (또는 DEV_PORT)를 사용하세요.
+- 포트 충돌 방지를 위해 서버 실행 전 항상 \`lsof -i :포트번호\` 또는 \`npx detect-port 포트번호\`로 확인하세요.
+- MCP playwright/browser 사용 시 localhost:1234 접근 금지!
+
+`;
 
 function getConfiguredModel(provider: AgentProvider): string | null {
     let keys: string[];
@@ -367,8 +406,15 @@ interface StartJobParams {
     provider: AgentProvider;
 }
 
-export function startBackgroundJob(params: StartJobParams): void {
-    const { jobId, conversationId, ticketId, ticketTitle, agentId, agentName, agentAvatar, projectPath, prompt, provider } = params;
+export async function startBackgroundJob(params: StartJobParams): Promise<void> {
+    const { jobId, conversationId, ticketId, ticketTitle, agentId, agentName, agentAvatar, projectPath, prompt: originalPrompt, provider } = params;
+
+    // Find an available port for the agent to use
+    const availablePort = await findAvailablePort(3001);
+    console.log(`[agent-jobs] Found available port: ${availablePort}`);
+
+    // Prepend safety instructions to the prompt
+    const prompt = PORT_SAFETY_INSTRUCTIONS + originalPrompt;
 
     // Configure command and args based on provider
     let execPath: string;
@@ -418,10 +464,11 @@ export function startBackgroundJob(params: StartJobParams): void {
     }
 
     // Set required vars
-    // NOTE: Do NOT hardcode PORT here - it causes conflicts when multiple agents run
-    // or when the target project's server is already using that port.
-    // Let agents find available ports dynamically.
+    // Provide an available port for agents to use (avoids conflicts with Olly Molly on 1234)
     spawnEnv.NODE_ENV = 'development';
+    spawnEnv.AVAILABLE_PORT = String(availablePort);
+    spawnEnv.DEV_PORT = String(availablePort);
+    spawnEnv.PORT = String(availablePort); // Some frameworks use PORT directly
 
     // For OpenCode, set permission to allow all to skip interactive prompts
     if (provider === 'opencode') {
