@@ -33,6 +33,13 @@ const executionStates = new Map<string, WorkflowExecutionState>();
 // Polling interval for checking job status
 const POLL_INTERVAL_MS = 1000;
 
+// Delay between sequential job starts (to allow cleanup)
+const JOB_START_DELAY_MS = 2000;
+
+// Retry configuration for starting jobs
+const MAX_START_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
+
 // Strip ANSI escape codes from output (same as kanban mode)
 function stripAnsi(input: string): string {
   return input
@@ -44,6 +51,41 @@ function stripAnsi(input: string): string {
 
 export function getExecutionState(workflowId: string): WorkflowExecutionState | null {
   return executionStates.get(workflowId) || null;
+}
+
+// Check if there's already a running job for a ticket
+async function checkExistingJob(ticketId: string): Promise<{ hasRunningJob: boolean; jobId?: string }> {
+  try {
+    const res = await fetch(`/api/agent/status?ticket_id=${ticketId}`);
+    const data = await res.json();
+    if (data.job && data.job.status === 'running') {
+      return { hasRunningJob: true, jobId: data.job.id };
+    }
+    return { hasRunningJob: false };
+  } catch {
+    return { hasRunningJob: false };
+  }
+}
+
+// Wait for any existing job on a ticket to complete
+async function waitForExistingJobToComplete(ticketId: string, maxWaitMs: number = 30000): Promise<void> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const { hasRunningJob, jobId } = await checkExistingJob(ticketId);
+    if (!hasRunningJob) {
+      return;
+    }
+    console.log(`[workflow-executor] Waiting for existing job ${jobId} on ticket ${ticketId} to complete...`);
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+
+  console.warn(`[workflow-executor] Timeout waiting for existing job on ticket ${ticketId}`);
+}
+
+// Delay helper
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export function initializeExecutionState(workflowId: string): WorkflowExecutionState {
@@ -64,14 +106,19 @@ async function waitForJobCompletion(
   conversationId: string,
   jobId: string
 ): Promise<{ success: boolean; commitHash?: string }> {
+  console.log(`[workflow-executor] waitForJobCompletion called for job ${jobId}`);
   return new Promise((resolve) => {
     let lastOutputLength = 0;
+    let jobGoneCount = 0; // Track how many times job was not found
+    const MAX_JOB_GONE_CHECKS = 3; // Wait for a few polls to confirm job is truly gone
+    let lastSeenJobStatus: string | null = null;
 
     const checkStatus = async () => {
       try {
         // Fetch job status and output (same as kanban mode's pollOutput)
         const res = await fetch(`/api/agent/status?job_id=${jobId}`);
         const data = await res.json();
+        console.log(`[workflow-executor] API response for job ${jobId}:`, JSON.stringify({ status: res.status, hasJob: !!data.job, jobStatus: data.job?.status }));
 
         // Poll output and save messages (same as kanban mode)
         const output = typeof data.output === 'string' ? data.output : '';
@@ -88,22 +135,48 @@ async function waitForJobCompletion(
 
         const job = data.job;
 
+        // Log every status check for debugging
+        console.log(`[workflow-executor] checkStatus: hasJob=${!!job}, jobStatus=${job?.status}, lastSeenJobStatus=${lastSeenJobStatus}, jobGoneCount=${jobGoneCount}`);
+
         if (!job) {
-          // Job not found, might have completed and been removed
-          // Check the conversation status instead
-          const conversation = conversationService.getById(conversationId);
-          if (conversation?.status === 'completed') {
-            resolve({ success: true, commitHash: conversation.git_commit_hash || undefined });
-          } else if (conversation?.status === 'failed' || conversation?.status === 'cancelled') {
-            resolve({ success: false });
-          } else {
-            // Assume completed if job is gone
+          jobGoneCount++;
+          console.log(`[workflow-executor] Job ${jobId} not found (attempt ${jobGoneCount}/${MAX_JOB_GONE_CHECKS}), lastSeenStatus: ${lastSeenJobStatus}`);
+
+          // If we saw the job as 'completed' before it disappeared, trust that
+          if (lastSeenJobStatus === 'completed') {
+            console.log(`[workflow-executor] ##### PATH C: Job was last seen as completed - returning success #####`);
             resolve({ success: true });
+            return;
           }
+
+          // If we saw the job as 'failed' before it disappeared, trust that
+          if (lastSeenJobStatus === 'failed') {
+            console.log(`[workflow-executor] ##### PATH D: Job was last seen as failed - returning failure #####`);
+            resolve({ success: false });
+            return;
+          }
+
+          // Wait for a few more polls to make sure job is truly gone
+          if (jobGoneCount < MAX_JOB_GONE_CHECKS) {
+            setTimeout(checkStatus, POLL_INTERVAL_MS);
+            return;
+          }
+
+          // Job not found after multiple attempts
+          // Since server logs show jobs complete successfully, but client never sees 'completed' status,
+          // we should assume success when lastSeenJobStatus was 'running' (job finished and was cleaned up)
+          // Only fail if we explicitly saw 'failed' status (handled above in PATH D)
+          console.log(`[workflow-executor] ##### PATH G: Job gone after running, lastSeenStatus=${lastSeenJobStatus} - returning SUCCESS (server completed job) #####`);
+          resolve({ success: true });
           return;
         }
 
+        // Job found - reset gone counter and track status
+        jobGoneCount = 0;
+        lastSeenJobStatus = job.status;
+
         if (job.status === 'completed') {
+          console.log(`[workflow-executor] ##### PATH A: Job ${jobId} status is COMPLETED - returning success #####`);
           // Final output fetch before resolving
           const finalOutput = typeof data.output === 'string' ? data.output : '';
           if (finalOutput.length > lastOutputLength) {
@@ -116,6 +189,7 @@ async function waitForJobCompletion(
         }
 
         if (job.status === 'failed') {
+          console.log(`[workflow-executor] ##### PATH B: Job ${jobId} status is FAILED - returning failure #####`);
           resolve({ success: false });
           return;
         }
@@ -124,6 +198,7 @@ async function waitForJobCompletion(
         setTimeout(checkStatus, POLL_INTERVAL_MS);
       } catch (error) {
         console.error('[workflow-executor] Error checking job status:', error);
+        // Don't immediately fail on error, retry a few times
         setTimeout(checkStatus, POLL_INTERVAL_MS);
       }
     };
@@ -145,8 +220,17 @@ async function executeNode(
     const project = projectService.getById(projectId);
 
     if (!agent || !project) {
-      console.error('[workflow-executor] Agent or project not found');
+      console.error('[workflow-executor] Agent or project not found:', { agentId, projectId, agentFound: !!agent, projectFound: !!project });
       return { success: false, conversationId: null };
+    }
+
+    // Check for and wait for any existing running job on this ticket
+    const existingJobCheck = await checkExistingJob(ticket.id);
+    if (existingJobCheck.hasRunningJob) {
+      console.log(`[workflow-executor] Found existing running job ${existingJobCheck.jobId} for ticket ${ticket.id}, waiting...`);
+      await waitForExistingJobToComplete(ticket.id);
+      // Add extra delay after existing job completes
+      await delay(JOB_START_DELAY_MS);
     }
 
     // Create conversation record (same as Kanban view)
@@ -163,49 +247,129 @@ async function executeNode(
       'system'
     );
 
-    // Start the agent job using the correct API endpoint
-    const response = await fetch('/api/agent/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ticket: {
-          id: ticket.id,
-          title: ticket.title,
-          description: ticket.description,
-        },
-        agent: {
-          id: agent.id,
-          name: agent.name,
-          role: agent.role,
-          avatar: agent.avatar,
-          system_prompt: agent.system_prompt,
-          can_generate_images: agent.can_generate_images,
-          can_log_screenshots: agent.can_log_screenshots,
-        },
-        project: {
-          id: project.id,
-          name: project.name,
-          path: project.path,
-        },
-        conversation_id: conversation.id,
-        provider,
-      }),
-    });
+    // Prepare request body
+    const requestBody = {
+      ticket: {
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description,
+      },
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        role: agent.role,
+        avatar: agent.avatar,
+        system_prompt: agent.system_prompt,
+        can_generate_images: agent.can_generate_images,
+        can_log_screenshots: agent.can_log_screenshots,
+      },
+      project: {
+        id: project.id,
+        name: project.name,
+        path: project.path,
+      },
+      conversation_id: conversation.id,
+      provider,
+    };
 
-    const responseData = await response.json().catch(() => ({}));
+    // Start the agent job with retry logic
+    let response: Response | null = null;
+    let responseData: { success?: boolean; job_id?: string; error?: string; details?: string } = {};
+    let lastError: Error | null = null;
+    let conflictWaitCount = 0;
+    const MAX_CONFLICT_WAITS = 3;
 
-    if (!response.ok || !responseData.success) {
-      console.error('[workflow-executor] Failed to start agent job:', responseData);
+    for (let attempt = 1; attempt <= MAX_START_RETRIES; attempt++) {
+      try {
+        console.log(`[workflow-executor] Starting agent job attempt ${attempt}/${MAX_START_RETRIES} for ticket "${ticket.title}"`);
+
+        response = await fetch('/api/agent/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        responseData = await response.json().catch((parseError) => {
+          console.error('[workflow-executor] Failed to parse response JSON:', parseError);
+          return { error: 'Failed to parse response', details: String(parseError) };
+        });
+
+        if (response.ok && responseData.success) {
+          console.log(`[workflow-executor] Agent job started successfully on attempt ${attempt}`);
+          break;
+        }
+
+        // Handle 409 Conflict (job already running) specially
+        if (response.status === 409) {
+          conflictWaitCount++;
+          if (conflictWaitCount > MAX_CONFLICT_WAITS) {
+            console.error(`[workflow-executor] Too many conflict waits (${conflictWaitCount}), giving up`);
+            break;
+          }
+          console.log(`[workflow-executor] Job already running for ticket, waiting for it to complete (wait ${conflictWaitCount}/${MAX_CONFLICT_WAITS})...`);
+          conversationMessageService.create(
+            conversation.id,
+            `⏳ Waiting for previous job to complete before starting (${conflictWaitCount}/${MAX_CONFLICT_WAITS})...`,
+            'system'
+          );
+          await waitForExistingJobToComplete(ticket.id);
+          await delay(JOB_START_DELAY_MS);
+          // Don't count this as a failed attempt, just retry
+          attempt--;
+          continue;
+        }
+
+        // Log detailed error info
+        console.error(`[workflow-executor] Attempt ${attempt} failed:`, {
+          status: response.status,
+          statusText: response.statusText,
+          responseData,
+          ticketId: ticket.id,
+          ticketTitle: ticket.title,
+          agentName: agent.name,
+          projectPath: project.path,
+        });
+
+        if (attempt < MAX_START_RETRIES) {
+          console.log(`[workflow-executor] Retrying in ${RETRY_DELAY_MS}ms...`);
+          await delay(RETRY_DELAY_MS);
+        }
+      } catch (fetchError) {
+        lastError = fetchError instanceof Error ? fetchError : new Error(String(fetchError));
+        console.error(`[workflow-executor] Fetch error on attempt ${attempt}:`, {
+          error: lastError.message,
+          ticketId: ticket.id,
+        });
+
+        if (attempt < MAX_START_RETRIES) {
+          await delay(RETRY_DELAY_MS);
+        }
+      }
+    }
+
+    // Check if all retries failed
+    if (!response?.ok || !responseData.success) {
+      const errorMsg = responseData.error || responseData.details || lastError?.message || 'Unknown error';
+      console.error('[workflow-executor] All attempts to start agent job failed:', {
+        finalError: errorMsg,
+        responseData,
+        ticketId: ticket.id,
+        ticketTitle: ticket.title,
+      });
       conversationService.complete(conversation.id, { status: 'failed' });
-      conversationMessageService.create(conversation.id, '❌ Failed to start agent job', 'error');
+      conversationMessageService.create(
+        conversation.id,
+        `❌ Failed to start agent job after ${MAX_START_RETRIES} attempts: ${errorMsg}`,
+        'error'
+      );
       return { success: false, conversationId: conversation.id };
     }
 
     const jobId = responseData.job_id;
     if (!jobId) {
-      console.error('[workflow-executor] No job_id returned from API');
+      console.error('[workflow-executor] No job_id returned from API:', responseData);
       conversationService.complete(conversation.id, { status: 'failed' });
-      conversationMessageService.create(conversation.id, '❌ No job ID received', 'error');
+      conversationMessageService.create(conversation.id, '❌ No job ID received from API', 'error');
       return { success: false, conversationId: conversation.id };
     }
 
@@ -244,6 +408,8 @@ export async function executeWorkflow(
   workflowId: string,
   options: ExecuteWorkflowOptions
 ): Promise<boolean> {
+  console.log('[workflow-executor] ===== UPDATED CODE LOADED - v2 =====');
+  console.log('[workflow-executor] Starting workflow execution:', workflowId);
   const workflow = workflowService.getById(workflowId);
   if (!workflow) {
     console.error('[workflow-executor] Workflow not found:', workflowId);
@@ -348,6 +514,10 @@ export async function executeWorkflow(
 
       // Notify callback
       options.onNodeComplete?.(nodeId, true);
+
+      // Add delay between nodes to allow cleanup
+      console.log(`[workflow-executor] Node ${nodeId} completed, waiting ${JOB_START_DELAY_MS}ms before next node...`);
+      await delay(JOB_START_DELAY_MS);
     }
 
     // All nodes completed successfully

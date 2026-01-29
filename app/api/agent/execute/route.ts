@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { startBackgroundJob, AgentProvider } from '@/lib/agent-jobs';
+import { startBackgroundJob, AgentProvider, getJobByTicketId } from '@/lib/agent-jobs';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AgentExecuteRequest {
@@ -121,12 +121,45 @@ export async function POST(request: NextRequest) {
         const body: AgentExecuteRequest = await request.json();
 
         if (!body.ticket || !body.agent || !body.project) {
-            return NextResponse.json({ error: 'ticket, agent, and project are required' }, { status: 400 });
+            console.error('[agent/execute] Missing required fields:', {
+                hasTicket: !!body.ticket,
+                hasAgent: !!body.agent,
+                hasProject: !!body.project,
+            });
+            return NextResponse.json({
+                success: false,
+                error: 'ticket, agent, and project are required',
+                details: {
+                    hasTicket: !!body.ticket,
+                    hasAgent: !!body.agent,
+                    hasProject: !!body.project,
+                }
+            }, { status: 400 });
         }
 
         const ticket = body.ticket;
         const agent = body.agent;
         const project = body.project;
+
+        // Check for existing running job for this ticket
+        const existingJob = getJobByTicketId(ticket.id);
+        if (existingJob && existingJob.status === 'running') {
+            console.warn('[agent/execute] Job already running for ticket:', {
+                ticketId: ticket.id,
+                ticketTitle: ticket.title,
+                existingJobId: existingJob.id,
+                existingJobAgent: existingJob.agentName,
+            });
+            return NextResponse.json({
+                success: false,
+                error: 'A job is already running for this ticket',
+                details: {
+                    existingJobId: existingJob.id,
+                    existingAgentName: existingJob.agentName,
+                    ticketId: ticket.id,
+                }
+            }, { status: 409 }); // 409 Conflict
+        }
 
         // Build prompt
         const prompt = buildAgentPrompt(ticket, agent, project, body.feedback);
@@ -137,6 +170,15 @@ export async function POST(request: NextRequest) {
         // Generate job ID
         const jobId = uuidv4();
         const conversationId = body.conversation_id || uuidv4();
+
+        console.log('[agent/execute] Starting new job:', {
+            jobId,
+            ticketId: ticket.id,
+            ticketTitle: ticket.title,
+            agentName: agent.name,
+            projectPath: project.path,
+            provider,
+        });
 
         // Start background job (non-blocking)
         startBackgroundJob({
@@ -172,10 +214,18 @@ export async function POST(request: NextRequest) {
             ticket_status: 'IN_PROGRESS',
         });
     } catch (error) {
-        console.error('Error executing agent:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+
+        console.error('[agent/execute] Error executing agent:', {
+            error: errorMessage,
+            stack: errorStack,
+        });
+
         return NextResponse.json({
+            success: false,
             error: 'Failed to execute agent',
-            details: String(error)
+            details: errorMessage,
         }, { status: 500 });
     }
 }
