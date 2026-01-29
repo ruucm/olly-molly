@@ -65,12 +65,12 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
     const allMembers = useMembers();
     const assignableMembers = useMemo(() => allMembers.filter(m => m.role !== 'PM'), [allMembers]);
 
-    // Initialize selected members when modal opens
+    // Reset selected members when modal closes
     useEffect(() => {
-        if (isOpen && selectedMemberIds.length === 0 && assignableMembers.length > 0) {
-            setSelectedMemberIds(assignableMembers.map(m => m.id));
+        if (!isOpen) {
+            setSelectedMemberIds([]);
         }
-    }, [isOpen, assignableMembers, selectedMemberIds.length]);
+    }, [isOpen]);
 
     const toggleMember = (memberId: string) => {
         setSelectedMemberIds(prev =>

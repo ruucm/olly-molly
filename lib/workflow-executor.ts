@@ -282,7 +282,7 @@ async function executeNode(
 
     // Start the agent job with retry logic
     let response: Response | null = null;
-    let responseData: { success?: boolean; job_id?: string; error?: string; details?: string } = {};
+    let responseData: { success?: boolean; job_id?: string; error?: string; details?: string; stderr?: string; command?: string } = {};
     let lastError: Error | null = null;
     let conflictWaitCount = 0;
     const MAX_CONFLICT_WAITS = 3;
