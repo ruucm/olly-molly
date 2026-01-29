@@ -105,13 +105,14 @@ async function waitForJobCompletion(
   ticketId: string,
   conversationId: string,
   jobId: string
-): Promise<{ success: boolean; commitHash?: string }> {
+): Promise<{ success: boolean; commitHash?: string; failureReason?: string }> {
   console.log(`[workflow-executor] waitForJobCompletion called for job ${jobId}`);
   return new Promise((resolve) => {
     let lastOutputLength = 0;
     let jobGoneCount = 0; // Track how many times job was not found
     const MAX_JOB_GONE_CHECKS = 3; // Wait for a few polls to confirm job is truly gone
     let lastSeenJobStatus: string | null = null;
+    let lastErrorOutput = ''; // Track last error output for failure message
 
     const checkStatus = async () => {
       try {
@@ -125,12 +126,16 @@ async function waitForJobCompletion(
         if (output.length > lastOutputLength) {
           const delta = output.slice(lastOutputLength);
           const cleaned = stripAnsi(delta);
-          const type =
-            cleaned.includes('[stderr]') || cleaned.includes('[error]') || /(^|\n)\s*(error:|fatal:)/i.test(cleaned)
-              ? 'error'
-              : 'log';
+          const isError = cleaned.includes('[stderr]') || cleaned.includes('[error]') || /(^|\n)\s*(error:|fatal:)/i.test(cleaned);
+          const type = isError ? 'error' : 'log';
           conversationMessageService.create(conversationId, cleaned, type);
           lastOutputLength = output.length;
+
+          // Track error output for failure reporting
+          if (isError) {
+            // Keep last 500 chars of error output
+            lastErrorOutput = (lastErrorOutput + cleaned).slice(-500);
+          }
         }
 
         const job = data.job;
@@ -152,7 +157,7 @@ async function waitForJobCompletion(
           // If we saw the job as 'failed' before it disappeared, trust that
           if (lastSeenJobStatus === 'failed') {
             console.log(`[workflow-executor] ##### PATH D: Job was last seen as failed - returning failure #####`);
-            resolve({ success: false });
+            resolve({ success: false, failureReason: lastErrorOutput || 'Job failed (no error details available)' });
             return;
           }
 
@@ -190,7 +195,10 @@ async function waitForJobCompletion(
 
         if (job.status === 'failed') {
           console.log(`[workflow-executor] ##### PATH B: Job ${jobId} status is FAILED - returning failure #####`);
-          resolve({ success: false });
+          // Get last portion of output for error context
+          const fullOutput = typeof data.output === 'string' ? data.output : '';
+          const lastLines = fullOutput.split('\n').slice(-10).join('\n').slice(-500);
+          resolve({ success: false, failureReason: lastErrorOutput || lastLines || 'Job failed (no error details available)' });
           return;
         }
 
@@ -350,6 +358,25 @@ async function executeNode(
     // Check if all retries failed
     if (!response?.ok || !responseData.success) {
       const errorMsg = responseData.error || responseData.details || lastError?.message || 'Unknown error';
+      const statusCode = response?.status || 'N/A';
+      const statusText = response?.statusText || 'N/A';
+
+      // Build detailed error message for UI
+      const detailParts: string[] = [];
+      detailParts.push(`Error: ${errorMsg}`);
+      if (statusCode !== 'N/A') {
+        detailParts.push(`HTTP ${statusCode} ${statusText}`);
+      }
+      if (responseData.details && responseData.details !== errorMsg) {
+        detailParts.push(`Details: ${typeof responseData.details === 'object' ? JSON.stringify(responseData.details) : responseData.details}`);
+      }
+      if (responseData.stderr) {
+        detailParts.push(`stderr: ${responseData.stderr}`);
+      }
+      if (responseData.command) {
+        detailParts.push(`Command: ${responseData.command}`);
+      }
+
       console.error('[workflow-executor] All attempts to start agent job failed:', {
         finalError: errorMsg,
         responseData,
@@ -359,7 +386,7 @@ async function executeNode(
       conversationService.complete(conversation.id, { status: 'failed' });
       conversationMessageService.create(
         conversation.id,
-        `❌ Failed to start agent job after ${MAX_START_RETRIES} attempts: ${errorMsg}`,
+        `❌ Failed to start agent job after ${MAX_START_RETRIES} attempts\n${detailParts.join('\n')}`,
         'error'
       );
       return { success: false, conversationId: conversation.id };
@@ -385,7 +412,11 @@ async function executeNode(
     if (result.success) {
       conversationMessageService.create(conversation.id, '✅ Task completed successfully', 'success');
     } else {
-      conversationMessageService.create(conversation.id, '❌ Task failed', 'error');
+      // Include failure reason if available
+      const failureMsg = result.failureReason
+        ? `❌ Task failed\n\nLast error output:\n${result.failureReason}`
+        : '❌ Task failed (no error details available)';
+      conversationMessageService.create(conversation.id, failureMsg, 'error');
     }
 
     return { success: result.success, conversationId: conversation.id };
