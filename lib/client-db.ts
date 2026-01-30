@@ -1053,7 +1053,7 @@ export const projectService = {
   getAll(): Project[] {
     return Array.from(projectsCollection.values()).sort((a, b) => {
       if (a.is_active !== b.is_active) return b.is_active - a.is_active;
-      return a.name.localeCompare(b.name);
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
   },
   getById(id: string): Project | undefined {
