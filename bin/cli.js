@@ -30,6 +30,7 @@ const CLI_OPTIONS = {
     reset: { type: 'boolean', default: false },
     'export-db': { type: 'string' },
     'import-db': { type: 'string' },
+    'update-only': { type: 'boolean', default: false },
 };
 
 // Parse CLI arguments
@@ -77,6 +78,7 @@ ADVANCED OPTIONS
       --reset             Reset all app data (with confirmation)
       --export-db <path>  Export database to zip file
       --import-db <path>  Import database from zip file
+      --update-only       Download/update only, then exit (don't start server)
 
 INFO
   -V, --version           Show version and exit
@@ -640,6 +642,13 @@ async function main() {
     if (needsBuild || !hasProductionBuild(config.APP_DIR, standaloneServerPath)) {
         console.log('\n🔨 Building...\n');
         execSync('npm run build', { cwd: config.APP_DIR, stdio: 'inherit' });
+    }
+
+    // Exit early if --update-only
+    if (args['update-only']) {
+        const finalVersion = getLocalVersion(config.APP_DIR);
+        console.log(`✅ Update complete (v${finalVersion || 'unknown'}). Exiting without starting server.`);
+        process.exit(0);
     }
 
     const displayHost = config.HOST === '0.0.0.0' ? 'localhost' : config.HOST;
