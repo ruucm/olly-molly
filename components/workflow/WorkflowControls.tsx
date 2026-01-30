@@ -54,25 +54,96 @@ export function WorkflowControls({
   const canPause = isRunning;
   const canReset = !isIdle;
 
-  return (
-    <div className="flex flex-wrap items-center gap-2 p-3 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
-      {/* Mobile: Sidebar Toggle */}
-      {isMobile && onToggleSidebar && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggleSidebar}
-          title="Toggle sidebar"
-          className="!px-2"
-        >
-          <Menu className="w-4 h-4" />
-        </Button>
-      )}
+  if (isMobile) {
+    return (
+      <div className="bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
+        {/* Row 1: Sidebar toggle + Name + Status + Ticket panel toggle */}
+        <div className="flex items-center gap-2 px-2 pt-2 pb-1">
+          {onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              title="Toggle sidebar"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+          )}
+          {workflow && (
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-sm font-medium text-[var(--text-primary)] truncate">
+                {workflow.name}
+              </span>
+              {workflow.status !== 'idle' && (
+                <span
+                  className={`
+                    text-xs px-1.5 py-0.5 rounded-full shrink-0
+                    ${workflow.status === 'running' ? 'bg-blue-500/20 text-blue-400' : ''}
+                    ${workflow.status === 'completed' ? 'bg-green-500/20 text-green-400' : ''}
+                    ${workflow.status === 'failed' ? 'bg-red-500/20 text-red-400' : ''}
+                    ${workflow.status === 'paused' ? 'bg-yellow-500/20 text-yellow-400' : ''}
+                  `}
+                >
+                  {workflow.status}
+                </span>
+              )}
+            </div>
+          )}
+          {onToggleTicketPanel && (
+            <button
+              onClick={onToggleTicketPanel}
+              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              title="Toggle ticket panel"
+            >
+              <PanelRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
 
+        {/* Row 2: Provider + Action buttons */}
+        <div className="flex items-center gap-1.5 px-2 pb-2">
+          {(['claude', 'opencode', 'codex'] as AgentProvider[]).map((provider) => (
+            <button
+              key={provider}
+              onClick={() => onProviderChange(provider)}
+              disabled={isRunning}
+              className={`
+                px-2 py-1 text-xs font-medium rounded border transition-colors
+                ${selectedProvider === provider
+                  ? providerColors[provider]
+                  : 'bg-transparent text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--text-primary)]'
+                }
+                ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}
+              `}
+            >
+              {providerLabels[provider].short}
+            </button>
+          ))}
+
+          <div className="flex-1" />
+
+          <Button variant="primary" size="sm" onClick={onExecute} disabled={!canExecute} title={isPaused ? 'Resume' : 'Execute'}>
+            <Play className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onPause} disabled={!canPause} title="Pause">
+            <Pause className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onReset} disabled={!canReset} title="Reset">
+            <RotateCcw className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant={hasUnsavedChanges ? 'primary' : 'ghost'} size="sm" onClick={onSave} disabled={!hasUnsavedChanges} title="Save">
+            <Save className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 p-3 bg-[var(--bg-secondary)] border-b border-[var(--border-primary)]">
       {/* Workflow Name */}
       {workflow && (
-        <div className="flex items-center gap-2 mr-2 md:mr-4">
-          <span className="text-sm font-medium text-[var(--text-primary)] truncate max-w-[120px] md:max-w-none">
+        <div className="flex items-center gap-2 mr-4">
+          <span className="text-sm font-medium text-[var(--text-primary)]">
             {workflow.name}
           </span>
           {workflow.status !== 'idle' && (
@@ -107,85 +178,36 @@ export function WorkflowControls({
               ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
-            <span className="hidden md:inline">{providerLabels[provider].full}</span>
-            <span className="md:hidden">{providerLabels[provider].short}</span>
+            {providerLabels[provider].full}
           </button>
         ))}
       </div>
 
-      <div className="hidden md:block w-px h-6 bg-[var(--border-primary)] mr-2" />
+      <div className="w-px h-6 bg-[var(--border-primary)] mr-2" />
 
       <div className="flex items-center gap-2">
-        {/* Execute Button */}
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={onExecute}
-          disabled={!canExecute}
-          title={isPaused ? 'Resume workflow' : 'Execute workflow'}
-        >
+        <Button variant="primary" size="sm" onClick={onExecute} disabled={!canExecute} title={isPaused ? 'Resume workflow' : 'Execute workflow'}>
           <Play className="w-4 h-4" />
-          <span className="hidden md:inline">{isPaused ? 'Resume' : 'Execute'}</span>
+          {isPaused ? 'Resume' : 'Execute'}
         </Button>
-
-        {/* Pause Button */}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onPause}
-          disabled={!canPause}
-          title="Pause workflow"
-        >
+        <Button variant="secondary" size="sm" onClick={onPause} disabled={!canPause} title="Pause workflow">
           <Pause className="w-4 h-4" />
-          <span className="hidden md:inline">Pause</span>
+          Pause
         </Button>
-
-        {/* Reset Button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onReset}
-          disabled={!canReset}
-          title="Reset workflow"
-        >
+        <Button variant="ghost" size="sm" onClick={onReset} disabled={!canReset} title="Reset workflow">
           <RotateCcw className="w-4 h-4" />
-          <span className="hidden md:inline">Reset</span>
+          Reset
         </Button>
-
-        {/* Divider */}
-        <div className="hidden md:block w-px h-6 bg-[var(--border-primary)] mx-2" />
-
-        {/* Save Button */}
-        <Button
-          variant={hasUnsavedChanges ? 'primary' : 'ghost'}
-          size="sm"
-          onClick={onSave}
-          disabled={!hasUnsavedChanges}
-          title="Save changes"
-        >
+        <div className="w-px h-6 bg-[var(--border-primary)] mx-2" />
+        <Button variant={hasUnsavedChanges ? 'primary' : 'ghost'} size="sm" onClick={onSave} disabled={!hasUnsavedChanges} title="Save changes">
           <Save className="w-4 h-4" />
-          <span className="hidden md:inline">Save</span>
+          Save
         </Button>
       </div>
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Mobile: Ticket Panel Toggle */}
-      {isMobile && onToggleTicketPanel && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggleTicketPanel}
-          title="Toggle ticket panel"
-          className="!px-2"
-        >
-          <PanelRight className="w-4 h-4" />
-        </Button>
-      )}
-
-      {/* Help text */}
-      <span className="hidden md:flex text-xs text-[var(--text-muted)]">
+      <span className="text-xs text-[var(--text-muted)]">
         Drag tickets from the panel to add nodes
       </span>
     </div>

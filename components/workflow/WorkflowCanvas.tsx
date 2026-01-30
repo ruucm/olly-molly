@@ -409,6 +409,7 @@ export function WorkflowCanvas({
               <div
                 ref={reactFlowWrapper}
                 className="flex-1"
+                style={isMobile ? { touchAction: 'none' } : undefined}
                 onDragOver={onDragOver}
                 onDrop={onDrop}
               >
