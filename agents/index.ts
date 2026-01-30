@@ -41,6 +41,8 @@ import { simpleBackendAgent } from './simple-backend';
 import { dbSqliteAgent } from './db-sqlite';
 import { dbPostgresqlAgent } from './db-postgresql';
 import { githubAgent } from './github-agent';
+import { recipeAgent } from './recipe';
+import { dystopiaDiaryAgent } from './dystopia-diary';
 
 import type { AgentDefinition } from './types';
 
@@ -58,6 +60,8 @@ export { simpleBackendAgent } from './simple-backend';
 export { dbSqliteAgent } from './db-sqlite';
 export { dbPostgresqlAgent } from './db-postgresql';
 export { githubAgent } from './github-agent';
+export { recipeAgent } from './recipe';
+export { dystopiaDiaryAgent } from './dystopia-diary';
 
 /**
  * Array of all default agents.
@@ -77,4 +81,6 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   dbSqliteAgent,
   dbPostgresqlAgent,
   githubAgent,
+  recipeAgent,
+  dystopiaDiaryAgent,
 ];

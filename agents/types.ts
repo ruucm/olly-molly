@@ -87,6 +87,16 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'operations',
       tags: ['github', 'git', 'repository', 'sync', 'version-control'],
     },
+    RECIPE: {
+      description: '15분 내외 초간단 레시피를 md 파일과 썸네일 이미지로 정리해주는 요리 전문가입니다.',
+      category: 'custom',
+      tags: ['recipe', 'cooking', 'food', 'markdown', 'image-generation'],
+    },
+    DYSTOPIA_DIARY: {
+      description: '사용자의 하루를 디스토피아 SF 세계관의 소설 로그로 변환하는 기록 에이전트입니다.',
+      category: 'custom',
+      tags: ['writing', 'sf', 'diary', 'story', 'creative', 'image-generation'],
+    },
   };
 
   return metadata[role] || {
