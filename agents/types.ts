@@ -97,6 +97,16 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'custom',
       tags: ['writing', 'sf', 'diary', 'story', 'creative', 'image-generation'],
     },
+    INSTAGRAM_ANALYST: {
+      description: '인스타그램 광고 소재의 훅, 카피, 비주얼, CTA를 체계적으로 분석하는 퍼포먼스 마케팅 애널리스트입니다.',
+      category: 'custom',
+      tags: ['instagram', 'ad-analysis', 'marketing', 'creative', 'performance'],
+    },
+    AD_CREATOR: {
+      description: '분석 데이터 기반으로 전환율 높은 광고 카피, 비주얼 시안, 크리에이티브 이미지를 제작하는 광고 콘텐츠 제작자입니다.',
+      category: 'custom',
+      tags: ['ad-creative', 'copywriting', 'visual-design', 'marketing', 'image-generation'],
+    },
   };
 
   return metadata[role] || {

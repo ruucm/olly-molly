@@ -43,6 +43,8 @@ import { dbPostgresqlAgent } from './db-postgresql';
 import { githubAgent } from './github-agent';
 import { recipeAgent } from './recipe';
 import { dystopiaDiaryAgent } from './dystopia-diary';
+import { instagramAnalystAgent } from './instagram-analyst';
+import { adCreatorAgent } from './ad-creator';
 
 import type { AgentDefinition } from './types';
 
@@ -62,6 +64,8 @@ export { dbPostgresqlAgent } from './db-postgresql';
 export { githubAgent } from './github-agent';
 export { recipeAgent } from './recipe';
 export { dystopiaDiaryAgent } from './dystopia-diary';
+export { instagramAnalystAgent } from './instagram-analyst';
+export { adCreatorAgent } from './ad-creator';
 
 /**
  * Array of all default agents.
@@ -83,4 +87,6 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   githubAgent,
   recipeAgent,
   dystopiaDiaryAgent,
+  instagramAnalystAgent,
+  adCreatorAgent,
 ];
