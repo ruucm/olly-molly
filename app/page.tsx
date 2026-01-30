@@ -82,6 +82,15 @@ export default function Dashboard() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [emailChecked, setEmailChecked] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // View mode state
   const [activeView, setActiveView] = useState<ViewMode>('kanban');
@@ -643,7 +652,7 @@ export default function Dashboard() {
               </div>
             }
             right={
-              ticketSidebarOpen && selectedTicket ? (
+              !isMobile && ticketSidebarOpen && selectedTicket ? (
                 <TicketSidebar
                   isOpen={ticketSidebarOpen}
                   onClose={() => {
@@ -688,7 +697,7 @@ export default function Dashboard() {
         )}
 
         {/* Mobile Ticket Sidebar Overlay */}
-        {ticketSidebarOpen && selectedTicket && (
+        {isMobile && ticketSidebarOpen && selectedTicket && (
           <div
             className="fixed inset-0 bg-black/50 z-30 md:hidden"
             onClick={() => {
@@ -703,7 +712,7 @@ export default function Dashboard() {
           safe-area-bottom
           ${ticketSidebarOpen && selectedTicket ? 'translate-x-0' : 'translate-x-full'}
         `}>
-          {ticketSidebarOpen && selectedTicket && (
+          {isMobile && ticketSidebarOpen && selectedTicket && (
             <TicketSidebar
               isOpen={ticketSidebarOpen}
               onClose={() => {
