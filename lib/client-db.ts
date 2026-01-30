@@ -235,10 +235,15 @@ export function startAutoBackup(): void {
   const run = async () => {
     try {
       const backup = await exportDbBackup();
+      const email = await userSettingsService.getEmail();
+      const payload: Record<string, unknown> = { ...backup };
+      if (email) {
+        payload._email = email;
+      }
       await fetch('/api/db/backup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(backup),
+        body: JSON.stringify(payload),
       });
     } catch (error) {
       console.warn('[db] Auto backup failed', error);
