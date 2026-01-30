@@ -603,6 +603,28 @@ body {
   }
 }
 
+/* ReactFlow mobile adjustments */
+@media (max-width: 768px) {
+  .react-flow__minimap {
+    display: none !important;
+  }
+
+  .react-flow__controls {
+    bottom: 10px !important;
+    left: 10px !important;
+  }
+
+  .react-flow__controls-button {
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .react-flow__controls-button svg {
+    max-width: 14px !important;
+    max-height: 14px !important;
+  }
+}
+
 /* Safe area for iOS */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .mobile-bottom-nav {

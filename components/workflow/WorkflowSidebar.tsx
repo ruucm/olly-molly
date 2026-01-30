@@ -70,7 +70,7 @@ export function WorkflowSidebar({
   };
 
   return (
-    <div className="w-64 h-full flex flex-col border-r border-[var(--border-primary)] bg-[var(--bg-secondary)]">
+    <div className="w-full md:w-64 h-full flex flex-col border-r border-[var(--border-primary)] bg-[var(--bg-secondary)]">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-primary)]">
         <h3 className="text-sm font-medium text-[var(--text-primary)]">Workflows</h3>
@@ -138,7 +138,7 @@ export function WorkflowSidebar({
           <div
             key={workflow.id}
             className={`
-              flex items-center gap-2 px-3 py-2 cursor-pointer
+              group flex items-center gap-2 px-3 py-2 min-h-[44px] cursor-pointer
               transition-colors duration-150
               ${selectedWorkflowId === workflow.id
                 ? 'bg-[var(--accent-primary)]/10 border-l-2 border-[var(--accent-primary)]'
@@ -192,7 +192,7 @@ export function WorkflowSidebar({
                 </span>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

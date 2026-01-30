@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Search, GripVertical } from 'lucide-react';
+import { Search, GripVertical, Plus, X } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import type { Ticket, Member } from '@/lib/client-db';
 
@@ -10,6 +10,9 @@ interface TicketNodePanelProps {
   members: Member[];
   usedTicketIds: Set<string>;
   onDragStart: (ticket: Ticket, event: React.DragEvent) => void;
+  isMobile?: boolean;
+  onTapToAdd?: (ticket: Ticket) => void;
+  onClose?: () => void;
 }
 
 const statusLabels: Record<string, string> = {
@@ -33,6 +36,9 @@ export function TicketNodePanel({
   members,
   usedTicketIds,
   onDragStart,
+  isMobile,
+  onTapToAdd,
+  onClose,
 }: TicketNodePanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -73,15 +79,25 @@ export function TicketNodePanel({
   };
 
   return (
-    <div className="w-64 h-full flex flex-col border-l border-[var(--border-primary)] bg-[var(--bg-secondary)]">
+    <div className="w-full md:w-64 h-full flex flex-col border-l border-[var(--border-primary)] bg-[var(--bg-secondary)]">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-[var(--border-primary)]">
-        <h3 className="text-sm font-medium text-[var(--text-primary)]">
-          Available Tickets
-        </h3>
-        <p className="text-xs text-[var(--text-muted)] mt-0.5">
-          Drag to canvas to add
-        </p>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-primary)]">
+        <div>
+          <h3 className="text-sm font-medium text-[var(--text-primary)]">
+            Available Tickets
+          </h3>
+          <p className="text-xs text-[var(--text-muted)] mt-0.5">
+            {isMobile ? 'Tap ticket to add to canvas' : 'Drag to canvas to add'}
+          </p>
+        </div>
+        {isMobile && onClose && (
+          <button
+            onClick={onClose}
+            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {/* Search */}
@@ -143,17 +159,25 @@ export function TicketNodePanel({
         {filteredTickets.map((ticket) => (
           <div
             key={ticket.id}
-            draggable
-            onDragStart={(e) => onDragStart(ticket, e)}
-            className="
-              flex items-start gap-2 p-2 mb-2 rounded-lg
+            draggable={!isMobile}
+            onDragStart={!isMobile ? (e) => onDragStart(ticket, e) : undefined}
+            onClick={isMobile && onTapToAdd ? () => onTapToAdd(ticket) : undefined}
+            className={`
+              flex items-start gap-2 p-2 mb-2 rounded-lg min-h-[44px]
               bg-[var(--bg-primary)] border border-[var(--border-primary)]
-              cursor-grab active:cursor-grabbing
+              ${isMobile
+                ? 'cursor-pointer active:bg-[var(--bg-tertiary)]'
+                : 'cursor-grab active:cursor-grabbing'
+              }
               hover:border-[var(--accent-primary)] hover:shadow-sm
               transition-all duration-150
-            "
+            `}
           >
-            <GripVertical className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0 mt-0.5" />
+            {isMobile ? (
+              <Plus className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0 mt-0.5" />
+            ) : (
+              <GripVertical className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0 mt-0.5" />
+            )}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 mb-1">
                 <span

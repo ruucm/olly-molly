@@ -77,7 +77,7 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
   };
 
   return (
-    <div className="w-96 h-full flex flex-col border-l border-[var(--border-primary)] bg-[var(--bg-secondary)] overflow-hidden">
+    <div className="w-full md:w-96 h-full flex flex-col border-l border-[var(--border-primary)] bg-[var(--bg-secondary)] overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-primary)]">
         <div className="flex-1 min-w-0">
@@ -94,9 +94,9 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
         </div>
         <button
           onClick={onClose}
-          className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)]"
         >
-          <X className="w-4 h-4" />
+          <X className="w-5 h-5" />
         </button>
       </div>
 
