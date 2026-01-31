@@ -44,8 +44,8 @@ function buildAgentPrompt(ticket: {
     const isQA = agent.role === 'QA';
     const qaInstruction = isQA
         ? `\nIMPORTANT:
-1. PORT CONFIGURATION: When running tests or starting servers, use a DYNAMIC PORT. Check ports in range 3001-3999 and use the first available one. Do NOT hardcode any specific port as it may conflict with other agents or servers.
-2. TOOL USAGE: You MUST use the **Playwright MCP** (https://github.com/microsoft/playwright-mcp) tools for automated testing. verify the available tools and use them for browser automation and testing. Do NOT rely solely on manual terminal commands.
+1. PORT: Use the pre-assigned port from env var AVAILABLE_PORT (or DEV_PORT). It is already verified available. Do NOT scan for ports yourself — just use it directly: npm run dev -- --port $AVAILABLE_PORT
+2. TOOL USAGE: You MUST use the **Playwright MCP** tools for automated testing. Navigate to http://localhost:$AVAILABLE_PORT for browser tests.
 3. CLEANUP: After running tests, STOP any dev servers you started to free up ports for other agents.`
         : '';
 
@@ -68,16 +68,10 @@ If you need images for your implementation (backgrounds, icons, illustrations, e
     const screenshotInstruction = canLogScreenshots
         ? `\n\nSCREENSHOT REQUIREMENT:
 If you make any UI/visual changes, you MUST take screenshots to document your work:
-1. Start the dev server using a DYNAMIC PORT. First check if any port is already in use, then pick an available one from range 3001-3999:
-   - Check port availability: lsof -i :PORT_NUMBER (macOS/Linux) or netstat -ano | findstr :PORT_NUMBER (Windows)
-   - Next.js: "npm run dev -- --port PORT_NUMBER" (or "next dev -p PORT_NUMBER")
-   - Vite: "npm run dev -- --port PORT_NUMBER"
-   - IMPORTANT: If a port is already in use, try the next one. Do NOT kill existing processes using that port.
-2. Use browser automation tools (Playwright MCP or similar) to capture screenshots
-3. Save screenshots to the ".agent-screenshots/" folder in the project root
-4. Name files descriptively (e.g., "feature-result.png", "bug-fix-result.png")
-5. Include multiple screenshots if you changed multiple pages/components
-6. AFTER taking screenshots, STOP the dev server immediately to free up the port for other agents
+1. Start the dev server on the pre-assigned port: npm run dev -- --port $AVAILABLE_PORT (the port is already verified available, do NOT scan for ports)
+2. Use Playwright MCP to navigate to http://localhost:$AVAILABLE_PORT and capture screenshots
+3. Save screenshots to ".agent-screenshots/" in the project root with descriptive names
+4. AFTER taking screenshots, STOP the dev server immediately to free up the port
 This is MANDATORY for visual changes so other agents can reference your work.`
         : '';
 
@@ -105,13 +99,10 @@ INSTRUCTIONS:
 4. Write clean, well-documented code
 5. After completing, provide a brief summary of changes made
 6. COMMIT REQUIREMENT (MANDATORY): If you made any code or file changes, you MUST create a git commit before finishing. Do not skip this step unless there are truly no changes to commit.
-7. CRITICAL: You are working on the external project "${project.name}". When starting its server, use a DYNAMIC PORT (not 1234 which is used by Olly Molly). Check if ports in range 3001-3999 are available and use the first free one. Prefer "npm run dev -- --port PORT" when supported.
-8. CLEANUP REQUIREMENT (MANDATORY): Before finishing your task, you MUST stop any dev servers or processes you started. This is critical because multiple agents share the same environment.
-   - Kill any npm/node dev server you started: find the process and terminate it
-   - macOS/Linux: Use "lsof -ti :PORT | xargs kill -9" or "pkill -f 'next dev'" / "pkill -f 'vite'"
-   - Windows: Use "netstat -ano | findstr :PORT" to find PID, then "taskkill /PID <pid> /F"
-   - Verify the port is released before finishing
-   - Do NOT leave any background processes running${qaInstruction}${imageGenerationInstruction}${screenshotInstruction}
+7. PORT: Your assigned port is in env var AVAILABLE_PORT (also DEV_PORT, PORT). It is pre-verified available — use it directly without any port scanning. Example: npm run dev -- --port $AVAILABLE_PORT
+8. CLEANUP (MANDATORY): Before finishing, stop any dev servers you started. Kill the process on your assigned port.
+   - macOS/Linux: lsof -ti :$AVAILABLE_PORT | xargs kill -9
+   - Windows: for /f "tokens=5" %a in ('netstat -ano ^| findstr :$AVAILABLE_PORT') do taskkill /PID %a /F${qaInstruction}${imageGenerationInstruction}${screenshotInstruction}
 
 Please complete this task now.`;
 }

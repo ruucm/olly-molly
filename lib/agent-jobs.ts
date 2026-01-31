@@ -52,11 +52,11 @@ async function findAvailablePort(startPort = 3001): Promise<number> {
 
 // Common instructions prepended to all agent prompts
 const PORT_SAFETY_INSTRUCTIONS = `
-⚠️ 중요: 포트 사용 규칙
-- localhost:1234는 Olly Molly 앱이 사용 중입니다. 절대 건드리지 마세요!
-- dev 서버 실행 시 환경변수 AVAILABLE_PORT (또는 DEV_PORT)를 사용하세요.
-- 포트 충돌 방지를 위해 서버 실행 전 항상 \`lsof -i :포트번호\` 또는 \`npx detect-port 포트번호\`로 확인하세요.
-- MCP playwright/browser 사용 시 localhost:1234 접근 금지!
+⚠️ 포트 규칙:
+- localhost:1234는 Olly Molly 앱입니다. 접근하지 마세요.
+- dev 서버 포트: 환경변수 AVAILABLE_PORT (값: $AVAILABLE_PORT) — 이미 확인된 빈 포트입니다. 추가 스캔 없이 바로 사용하세요.
+- 서버 시작: npm run dev -- --port $AVAILABLE_PORT
+- 브라우저 테스트: http://localhost:$AVAILABLE_PORT
 
 `;
 
@@ -413,8 +413,9 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
     const availablePort = await findAvailablePort(3001);
     console.log(`[agent-jobs] Found available port: ${availablePort}`);
 
-    // Prepend safety instructions to the prompt
-    const prompt = PORT_SAFETY_INSTRUCTIONS + originalPrompt;
+    // Prepend safety instructions to the prompt (with actual port value substituted)
+    const safetyInstructions = PORT_SAFETY_INSTRUCTIONS.replace(/\$AVAILABLE_PORT/g, String(availablePort));
+    const prompt = safetyInstructions + originalPrompt;
 
     // Configure command and args based on provider
     let execPath: string;
