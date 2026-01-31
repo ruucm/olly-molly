@@ -494,6 +494,12 @@ function backupUserData(config) {
         fs.cpSync(config.CUSTOM_PROFILES_DIR, profilesBackupDir, { recursive: true });
     }
 
+    // Backup users directory (email-based user data)
+    const usersDir = path.join(config.APP_DIR, 'users');
+    if (fs.existsSync(usersDir)) {
+        fs.cpSync(usersDir, path.join(backupDir, 'users'), { recursive: true });
+    }
+
     // Backup user config files (ecosystem.config.js, .env, etc.)
     const userConfigFiles = ['ecosystem.config.js', '.env'];
     for (const file of userConfigFiles) {
@@ -527,6 +533,13 @@ function restoreUserData(backupDir, config) {
         for (const file of fs.readdirSync(profilesBackupDir)) {
             fs.copyFileSync(path.join(profilesBackupDir, file), path.join(config.CUSTOM_PROFILES_DIR, file));
         }
+    }
+
+    // Restore users directory (email-based user data)
+    const usersBackupDir = path.join(backupDir, 'users');
+    if (fs.existsSync(usersBackupDir)) {
+        const usersDir = path.join(config.APP_DIR, 'users');
+        fs.cpSync(usersBackupDir, usersDir, { recursive: true });
     }
 
     // Restore user config files (ecosystem.config.js, .env, etc.)
