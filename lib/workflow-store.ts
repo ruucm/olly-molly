@@ -3,9 +3,14 @@
  * Follows ComfyUI pattern - server owns all execution state.
  */
 
+// ─── Module Load Confirmation ─────────────────────────────────────────
+process.stdout.write(`[workflow-store:INIT] Module loading at ${new Date().toISOString()}\n`);
+
 // ─── Process Signal Handlers for Debugging ─────────────────────────────
 // Log any signals that might cause the process to exit
 if (typeof process !== 'undefined') {
+  process.stdout.write(`[workflow-store:INIT] Registering process handlers...\n`);
+
   const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT'];
   for (const signal of signals) {
     process.on(signal, () => {
@@ -22,6 +27,8 @@ if (typeof process !== 'undefined') {
     // Can only use sync operations here - use stderr as it's synchronous
     process.stderr.write(`[workflow-store:EXIT] Process exiting with code: ${code}\n`);
   });
+
+  process.stdout.write(`[workflow-store:INIT] Process handlers registered successfully\n`);
 }
 
 import {
@@ -378,17 +385,30 @@ function delay(ms: number): Promise<void> {
 }
 
 // Cleanup old executions (keep last 100)
-setInterval(() => {
-  const executions = Array.from(workflowExecutions.entries());
-  if (executions.length > 100) {
-    const sorted = executions.sort((a, b) =>
-      new Date(b[1].started_at).getTime() - new Date(a[1].started_at).getTime()
-    );
-    const toRemove = sorted.slice(100);
-    for (const [id] of toRemove) {
-      if (workflowExecutions.get(id)?.status !== 'running') {
-        workflowExecutions.delete(id);
+const cleanupInterval = setInterval(() => {
+  try {
+    const executions = Array.from(workflowExecutions.entries());
+    const runningCount = executions.filter(e => e[1].status === 'running').length;
+    process.stdout.write(`[workflow-store:cleanup] executions: ${executions.length}, running: ${runningCount}\n`);
+
+    if (executions.length > 100) {
+      const sorted = executions.sort((a, b) =>
+        new Date(b[1].started_at).getTime() - new Date(a[1].started_at).getTime()
+      );
+      const toRemove = sorted.slice(100);
+      let removed = 0;
+      for (const [id] of toRemove) {
+        if (workflowExecutions.get(id)?.status !== 'running') {
+          workflowExecutions.delete(id);
+          removed++;
+        }
+      }
+      if (removed > 0) {
+        process.stdout.write(`[workflow-store:cleanup] removed ${removed} old executions\n`);
       }
     }
+  } catch (error) {
+    process.stderr.write(`[workflow-store:CRITICAL] Cleanup error: ${error}\n`);
   }
 }, 60000);
+cleanupInterval.unref(); // Don't keep process alive just for cleanup

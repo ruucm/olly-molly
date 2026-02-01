@@ -9,14 +9,30 @@ import { addMessage, completeConversation } from './server-store';
 
 if (typeof process !== 'undefined') {
     process.on('uncaughtException', (error) => {
-        console.error('[agent-jobs:CRITICAL] Uncaught Exception:', error);
-        console.error('[agent-jobs:CRITICAL] Stack:', error.stack);
+        process.stderr.write(`[agent-jobs:CRITICAL] Uncaught Exception: ${error}\n`);
+        process.stderr.write(`[agent-jobs:CRITICAL] Stack: ${error.stack}\n`);
     });
 
     process.on('unhandledRejection', (reason, promise) => {
-        console.error('[agent-jobs:CRITICAL] Unhandled Rejection at:', promise);
-        console.error('[agent-jobs:CRITICAL] Reason:', reason);
+        process.stderr.write(`[agent-jobs:CRITICAL] Unhandled Rejection at: ${promise}\n`);
+        process.stderr.write(`[agent-jobs:CRITICAL] Reason: ${reason}\n`);
     });
+
+    // Add exit handler here too for redundancy
+    process.on('exit', (code) => {
+        process.stderr.write(`[agent-jobs:EXIT] Process exiting with code: ${code}\n`);
+    });
+
+    // Heartbeat timer - logs every 10 seconds to prove process is alive
+    let heartbeatCount = 0;
+    setInterval(() => {
+        heartbeatCount++;
+        const memUsage = process.memoryUsage();
+        const heapMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+        const rssMB = Math.round(memUsage.rss / 1024 / 1024);
+        const runningCount = runningJobs.size;
+        process.stdout.write(`[heartbeat:${heartbeatCount}] alive | jobs: ${runningCount}, heap: ${heapMB}MB, rss: ${rssMB}MB\n`);
+    }, 10000).unref(); // unref() so this doesn't keep the process alive
 }
 
 export type AgentProvider = 'claude' | 'opencode' | 'codex';

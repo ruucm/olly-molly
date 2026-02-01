@@ -27,6 +27,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate that all execution_order IDs exist in nodes
+    const nodeIds = new Set(body.nodes.map(n => n.id));
+    const missingIds = body.execution_order.filter(id => !nodeIds.has(id));
+    if (missingIds.length > 0) {
+      console.error(`[workflow/execute] Data mismatch! Missing node IDs in nodes array:`, missingIds);
+      console.error(`[workflow/execute] execution_order: ${JSON.stringify(body.execution_order)}`);
+      console.error(`[workflow/execute] node IDs: ${JSON.stringify(Array.from(nodeIds))}`);
+      return NextResponse.json(
+        { success: false, error: `Missing nodes: ${missingIds.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
     // Check if workflow is already running
     const existingExec = getWorkflowExecutionByWorkflowId(body.workflow_id);
     if (existingExec) {
@@ -39,6 +52,10 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
+
+    // Log workflow start details for debugging
+    console.log(`[workflow/execute] Starting workflow: ${body.workflow_name}`);
+    console.log(`[workflow/execute]   nodes: ${body.nodes.length}, execution_order: ${body.execution_order.length}`);
 
     // Create and start workflow execution
     const execution = createWorkflowExecution({
