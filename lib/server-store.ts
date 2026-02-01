@@ -69,6 +69,22 @@ const messagesByConversation = new Map<string, ServerConversationMessage[]>();
 /** Ticket statuses keyed by ticket_id */
 const ticketStatuses = new Map<string, TicketStatusUpdate>();
 
+// ─── Debug Logging ───────────────────────────────────────────────────
+
+function getMemoryUsage(): string {
+    const used = process.memoryUsage();
+    return `heap: ${Math.round(used.heapUsed / 1024 / 1024)}MB, rss: ${Math.round(used.rss / 1024 / 1024)}MB`;
+}
+
+export function logServerStoreState(context: string): void {
+    const runningConvs = Array.from(conversations.values()).filter(c => c.status === 'running').length;
+    let totalMessages = 0;
+    for (const msgs of messagesByConversation.values()) {
+        totalMessages += msgs.length;
+    }
+    console.log(`[server-store:debug] ${context} | conversations: ${conversations.size} (running: ${runningConvs}), messages: ${totalMessages}, tickets: ${ticketStatuses.size}, memory: ${getMemoryUsage()}`);
+}
+
 // ─── Conversation CRUD ───────────────────────────────────────────────
 
 export function createConversation(data: {
@@ -96,6 +112,7 @@ export function createConversation(data: {
     conversations.set(conversation.id, conversation);
     messagesByConversation.set(conversation.id, []);
     enforceHistoryLimit();
+    logServerStoreState(`conversation-created:${conversation.id.slice(0, 8)}`);
     return conversation;
 }
 
@@ -124,6 +141,7 @@ export function completeConversation(id: string, data: {
     conv.status = data.status;
     conv.git_commit_hash = data.git_commit_hash || null;
     conv.completed_at = new Date().toISOString();
+    logServerStoreState(`conversation-${data.status}:${id.slice(0, 8)}`);
 }
 
 // ─── Message CRUD ────────────────────────────────────────────────────

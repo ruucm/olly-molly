@@ -116,6 +116,42 @@ interface RunningJob {
 // Store running jobs in memory
 const runningJobs = new Map<string, RunningJob>();
 
+// ─── Debug Logging ───────────────────────────────────────────────────
+function getMemoryUsage(): string {
+    const used = process.memoryUsage();
+    return `heap: ${Math.round(used.heapUsed / 1024 / 1024)}MB, rss: ${Math.round(used.rss / 1024 / 1024)}MB`;
+}
+
+function logDebugState(context: string): void {
+    const runningCount = Array.from(runningJobs.values()).filter(j => j.status === 'running').length;
+    const jobsByProject = new Map<string, number>();
+    for (const job of runningJobs.values()) {
+        if (job.status === 'running') {
+            const count = jobsByProject.get(job.projectPath) || 0;
+            jobsByProject.set(job.projectPath, count + 1);
+        }
+    }
+    const projectSummary = Array.from(jobsByProject.entries())
+        .map(([p, c]) => `${path.basename(p)}:${c}`)
+        .join(', ') || 'none';
+    console.log(`[agent-jobs:debug] ${context} | running: ${runningCount}, total: ${runningJobs.size}, projects: [${projectSummary}], memory: ${getMemoryUsage()}`);
+}
+
+// Log debug state every 30 seconds if there are running jobs
+let debugIntervalId: NodeJS.Timeout | null = null;
+function startDebugInterval(): void {
+    if (debugIntervalId) return;
+    debugIntervalId = setInterval(() => {
+        const runningCount = Array.from(runningJobs.values()).filter(j => j.status === 'running').length;
+        if (runningCount > 0) {
+            logDebugState('interval-check');
+        } else if (debugIntervalId) {
+            clearInterval(debugIntervalId);
+            debugIntervalId = null;
+        }
+    }, 30000);
+}
+
 export function getRunningJobs(): Omit<RunningJob, 'process'>[] {
     return Array.from(runningJobs.values()).map(job => ({
         id: job.id,
@@ -410,6 +446,15 @@ interface StartJobParams {
 export async function startBackgroundJob(params: StartJobParams): Promise<void> {
     const { jobId, conversationId, ticketId, ticketTitle, agentId, agentName, agentAvatar, projectPath, prompt: originalPrompt, provider } = params;
 
+    // Debug: Log job start with current state
+    console.log(`[agent-jobs] Starting job: ${jobId}`);
+    console.log(`[agent-jobs]   ticket: ${ticketTitle} (${ticketId})`);
+    console.log(`[agent-jobs]   agent: ${agentName} (${agentId})`);
+    console.log(`[agent-jobs]   project: ${projectPath}`);
+    console.log(`[agent-jobs]   provider: ${provider}`);
+    logDebugState('job-start');
+    startDebugInterval();
+
     // Find an available port for the agent to use
     const availablePort = await findAvailablePort(3001);
     console.log(`[agent-jobs] Found available port: ${availablePort}`);
@@ -649,6 +694,7 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         job.status = success ? 'completed' : 'failed';
 
         console.log(`[agent-jobs] Task marked as: ${job.status} (code: ${code}, commitHash: ${commitHash}, successIndicators: ${hasSuccessIndicators}, failureIndicators: ${hasFailureIndicators}, claudeSuccess: ${claudeSuccess}, claudeResultIsError: ${claudeResultIsError})`);
+        logDebugState(`job-complete:${job.status}`);
 
         // Server completes the conversation (ComfyUI pattern: server handles completion)
         completeConversation(conversationId, {
@@ -679,12 +725,29 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         }, 60000); // Keep completed job info for 1 minute
     });
 
-    agentProcess.on('error', (error: Error) => {
+    agentProcess.on('error', (error: Error & { code?: string; syscall?: string }) => {
         job.status = 'failed';
-        job.output += `\n[error] ${error.message}`;
+
+        // Provide more detailed error information for debugging
+        let errorDetail = error.message;
+        if (error.code === 'EINVAL') {
+            errorDetail = `EINVAL: Invalid argument when spawning process. Command: ${execPath}, CWD: ${projectPath}`;
+            console.error(`[agent-jobs] EINVAL error details:`, {
+                command: execPath,
+                args: args,
+                cwd: projectPath,
+                platform: process.platform,
+            });
+        } else if (error.code === 'ENOENT') {
+            errorDetail = `ENOENT: Command not found: ${execPath}. Make sure ${provider} CLI is installed and in PATH.`;
+        }
+
+        job.output += `\n[error] ${errorDetail}`;
+        console.error(`[agent-jobs] Process error:`, error);
+        logDebugState(`job-error:${error.code || 'unknown'}`);
 
         completeConversation(conversationId, { status: 'failed' });
-        addMessage(conversationId, `❌ Process error: ${error.message}`, 'error');
+        addMessage(conversationId, `❌ Process error: ${errorDetail}`, 'error');
 
         setTimeout(() => {
             runningJobs.delete(jobId);

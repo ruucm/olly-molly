@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { startBackgroundJob, AgentProvider, getJobByTicketId } from '@/lib/agent-jobs';
-import { createConversation, addMessage } from '@/lib/server-store';
+import { startBackgroundJob, AgentProvider, getJobByTicketId, getRunningJobs } from '@/lib/agent-jobs';
+import { createConversation, addMessage, logServerStoreState } from '@/lib/server-store';
 import { v4 as uuidv4 } from 'uuid';
+
+// Track request count for debugging
+let requestCount = 0;
 
 interface AgentExecuteRequest {
     ticket?: {
@@ -109,11 +112,18 @@ Please complete this task now.`;
 }
 
 export async function POST(request: NextRequest) {
+    const reqId = ++requestCount;
+    const startTime = Date.now();
+    const runningJobs = getRunningJobs();
+
+    console.log(`[agent/execute] Request #${reqId} started | currently running jobs: ${runningJobs.length}`);
+    logServerStoreState(`execute-request-${reqId}`);
+
     try {
         const body: AgentExecuteRequest = await request.json();
 
         if (!body.ticket || !body.agent || !body.project) {
-            console.error('[agent/execute] Missing required fields:', {
+            console.error(`[agent/execute] Request #${reqId} - Missing required fields:`, {
                 hasTicket: !!body.ticket,
                 hasAgent: !!body.agent,
                 hasProject: !!body.project,
@@ -173,13 +183,14 @@ export async function POST(request: NextRequest) {
         });
         addMessage(conversationId, `🚀 ${agent.name} started working on "${ticket.title}"`, 'system');
 
-        console.log('[agent/execute] Starting new job:', {
+        console.log(`[agent/execute] Request #${reqId} - Starting new job:`, {
             jobId,
             ticketId: ticket.id,
             ticketTitle: ticket.title,
             agentName: agent.name,
             projectPath: project.path,
             provider,
+            currentRunningJobs: runningJobs.length,
         });
 
         // Start background job (find available port first, then run non-blocking)
@@ -195,6 +206,10 @@ export async function POST(request: NextRequest) {
             prompt,
             provider,
         });
+
+        const duration = Date.now() - startTime;
+        const newRunningJobs = getRunningJobs();
+        console.log(`[agent/execute] Request #${reqId} completed in ${duration}ms | running jobs: ${newRunningJobs.length}`);
 
         // Return immediately with job info + server-created conversation
         return NextResponse.json({
@@ -217,13 +232,15 @@ export async function POST(request: NextRequest) {
             ticket_status: 'IN_PROGRESS',
         });
     } catch (error) {
+        const duration = Date.now() - startTime;
         const errorMessage = error instanceof Error ? error.message : String(error);
         const errorStack = error instanceof Error ? error.stack : undefined;
 
-        console.error('[agent/execute] Error executing agent:', {
+        console.error(`[agent/execute] Request #${reqId} FAILED after ${duration}ms:`, {
             error: errorMessage,
             stack: errorStack,
         });
+        logServerStoreState(`execute-error-${reqId}`);
 
         return NextResponse.json({
             success: false,
