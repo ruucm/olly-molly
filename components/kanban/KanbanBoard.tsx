@@ -16,7 +16,7 @@ import {
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
 import { KanbanColumn } from './KanbanColumn';
 import { TicketCard } from './TicketCard';
-import { ticketService, memberService } from '@/lib/client-db';
+import { ticketService, memberService, syncFromServer } from '@/lib/client-db';
 
 interface Member {
     id: string;
@@ -97,6 +97,19 @@ export function KanbanBoard({
             coordinateGetter: sortableKeyboardCoordinates,
         })
     );
+
+    // Sync ticket statuses from server on mount and periodically
+    useEffect(() => {
+        // Initial sync
+        syncFromServer.syncAllTicketStatuses();
+
+        // Periodic sync every 5 seconds
+        const interval = setInterval(() => {
+            syncFromServer.syncAllTicketStatuses();
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, []);
 
     // Poll for running jobs
     useEffect(() => {

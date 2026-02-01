@@ -1099,6 +1099,72 @@ export const projectService = {
   },
 };
 
+/**
+ * Sync server-side execution data into IndexedDB (ComfyUI pattern).
+ * Server is source of truth; IndexedDB is just a reactive UI cache.
+ */
+export const syncFromServer = {
+  /** Upsert a conversation from server into IndexedDB */
+  upsertConversation(data: Conversation): void {
+    const existing = conversationsCollection.get(data.id);
+    if (existing) {
+      conversationsCollection.update(data.id, (draft) => {
+        draft.status = data.status;
+        draft.git_commit_hash = data.git_commit_hash;
+        draft.completed_at = data.completed_at;
+      });
+    } else {
+      conversationsCollection.insert(data);
+    }
+  },
+
+  /** Upsert a message from server into IndexedDB (skip if already exists) */
+  upsertMessage(data: ConversationMessage): void {
+    const existing = conversationMessagesCollection.get(data.id);
+    if (!existing) {
+      conversationMessagesCollection.insert(data);
+    }
+  },
+
+  /** Batch sync conversations and messages from server */
+  syncAll(conversations: Conversation[], messages: ConversationMessage[]): void {
+    for (const conv of conversations) {
+      this.upsertConversation(conv);
+    }
+    for (const msg of messages) {
+      this.upsertMessage(msg);
+    }
+  },
+
+  /** Update ticket status from server */
+  updateTicketStatus(ticketId: string, status: Ticket['status']): void {
+    const existing = ticketsCollection.get(ticketId);
+    if (existing && existing.status !== status) {
+      ticketsCollection.update(ticketId, (draft) => {
+        draft.status = status;
+        draft.updated_at = new Date().toISOString();
+      });
+      console.log(`[syncFromServer] Ticket ${ticketId} status updated to ${status}`);
+    }
+  },
+
+  /** Sync all ticket statuses from server (call on app load) */
+  async syncAllTicketStatuses(): Promise<void> {
+    try {
+      const res = await fetch('/api/tickets/sync');
+      const data = await res.json();
+      if (data.ticketStatuses) {
+        for (const statusUpdate of data.ticketStatuses) {
+          this.updateTicketStatus(statusUpdate.ticket_id, statusUpdate.status);
+        }
+        console.log(`[syncFromServer] Synced ${data.ticketStatuses.length} ticket statuses from server`);
+      }
+    } catch (error) {
+      console.error('[syncFromServer] Error syncing ticket statuses:', error);
+    }
+  },
+};
+
 export const conversationService = {
   create(data: {
     ticket_id: string;

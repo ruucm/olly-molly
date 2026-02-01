@@ -14,7 +14,7 @@ const roleImages: Record<string, string> = {
   BUG_HUNTER: '/profiles/dev-bughunter.jpg',
 };
 
-export type WorkflowNodeStatus = 'idle' | 'running' | 'completed' | 'failed';
+export type WorkflowNodeStatus = 'idle' | 'pending' | 'running' | 'completed' | 'failed';
 
 export interface WorkflowNodeData {
   ticket: Ticket;
@@ -24,6 +24,7 @@ export interface WorkflowNodeData {
 
 const statusStyles: Record<WorkflowNodeStatus, string> = {
   idle: 'border-[var(--border-secondary)]',
+  pending: 'border-yellow-500/50',
   running: 'border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]',
   completed: 'border-green-500',
   failed: 'border-red-500',

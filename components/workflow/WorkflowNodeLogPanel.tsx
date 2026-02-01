@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, RefreshCw, CheckCircle2, XCircle, Loader2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { useConversations, useConversationMessages, type Ticket, type Member } from '@/lib/client-db';
+import { useConversations, useConversationMessages, syncFromServer, type Ticket, type Member } from '@/lib/client-db';
 
 interface WorkflowNodeLogPanelProps {
   ticket: Ticket;
@@ -17,6 +17,42 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
   const messages = useConversationMessages(selectedConversationId);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+
+  // Sync conversations from server (ComfyUI pattern - server is source of truth)
+  const syncFromServerData = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/conversations/sync?ticket_id=${ticket.id}`);
+      const data = await res.json();
+
+      if (data.conversations) {
+        for (const conv of data.conversations) {
+          syncFromServer.upsertConversation(conv);
+        }
+      }
+      if (data.messages) {
+        for (const msg of data.messages) {
+          syncFromServer.upsertMessage(msg);
+        }
+      }
+      // Sync ticket status from server
+      if (data.ticketStatuses) {
+        for (const statusUpdate of data.ticketStatuses) {
+          syncFromServer.updateTicketStatus(statusUpdate.ticket_id, statusUpdate.status);
+        }
+      }
+    } catch (error) {
+      console.error('[WorkflowNodeLogPanel] Error syncing from server:', error);
+    }
+  }, [ticket.id]);
+
+  // Sync from server when ticket changes and periodically while panel is open
+  useEffect(() => {
+    syncFromServerData();
+
+    // Poll every 2 seconds for updates
+    const interval = setInterval(syncFromServerData, 2000);
+    return () => clearInterval(interval);
+  }, [syncFromServerData]);
 
   // Reset selected conversation when ticket changes
   useEffect(() => {

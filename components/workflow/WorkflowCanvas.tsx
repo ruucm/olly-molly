@@ -38,6 +38,7 @@ import {
   pauseWorkflow,
   resetWorkflow,
   getExecutionState,
+  syncWorkflowStatus,
   type NodeExecutionStatus,
 } from '@/lib/workflow-executor';
 
@@ -332,14 +333,39 @@ export function WorkflowCanvas({
     setHasUnsavedChanges(false);
   }, []);
 
-  // Update node statuses
+  // Sync workflow status from server on mount/selection (browser reconnection)
   useEffect(() => {
-    if (selectedWorkflowId) {
-      const state = getExecutionState(selectedWorkflowId);
+    if (!selectedWorkflowId) return;
+
+    // First check client-side state
+    const clientState = getExecutionState(selectedWorkflowId);
+    if (clientState && clientState.nodeStatuses.size > 0) {
+      setNodeStatuses(new Map(clientState.nodeStatuses));
+      return;
+    }
+
+    // If no client state, sync from server (browser reconnection case)
+    syncWorkflowStatus(selectedWorkflowId).then((state) => {
+      if (state && state.nodeStatuses.size > 0) {
+        setNodeStatuses(new Map(state.nodeStatuses));
+        console.log('[WorkflowCanvas] Restored workflow status from server');
+      }
+    });
+  }, [selectedWorkflowId]);
+
+  // Poll server for node status updates while workflow is running
+  useEffect(() => {
+    if (!selectedWorkflowId || selectedWorkflow?.status !== 'running') return;
+
+    const pollServerStatus = async () => {
+      const state = await syncWorkflowStatus(selectedWorkflowId);
       if (state) {
         setNodeStatuses(new Map(state.nodeStatuses));
       }
-    }
+    };
+
+    const interval = setInterval(pollServerStatus, 2000);
+    return () => clearInterval(interval);
   }, [selectedWorkflowId, selectedWorkflow?.status]);
 
   return (

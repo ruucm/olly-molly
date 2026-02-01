@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { startBackgroundJob, AgentProvider, getJobByTicketId } from '@/lib/agent-jobs';
+import { createConversation, addMessage } from '@/lib/server-store';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AgentExecuteRequest {
@@ -158,9 +159,19 @@ export async function POST(request: NextRequest) {
         // Use provided provider or default to 'claude'
         const provider: AgentProvider = body.provider || 'claude';
 
-        // Generate job ID
+        // Generate job ID and create conversation on server (ComfyUI pattern)
         const jobId = uuidv4();
         const conversationId = body.conversation_id || uuidv4();
+
+        // Server creates conversation in memory (browser no longer does this)
+        const conversation = createConversation({
+            id: conversationId,
+            ticket_id: ticket.id,
+            agent_id: agent.id,
+            provider,
+            feedback: body.feedback,
+        });
+        addMessage(conversationId, `🚀 ${agent.name} started working on "${ticket.title}"`, 'system');
 
         console.log('[agent/execute] Starting new job:', {
             jobId,
@@ -185,11 +196,12 @@ export async function POST(request: NextRequest) {
             provider,
         });
 
-        // Return immediately with job info
+        // Return immediately with job info + server-created conversation
         return NextResponse.json({
             success: true,
             job_id: jobId,
             conversation_id: conversationId,
+            conversation,
             message: `${agent.name} started working on the task. The job is running in the background.`,
             agent: {
                 id: agent.id,

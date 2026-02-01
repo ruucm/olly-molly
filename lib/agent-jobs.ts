@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import net from 'net';
+import { addMessage, completeConversation } from './server-store';
 
 export type AgentProvider = 'claude' | 'opencode' | 'codex';
 
@@ -528,6 +529,8 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         streamedTextBuffer = '';
         lastFlushTime = now;
         job.output += chunk;
+        // Server stores the message (ComfyUI pattern: server owns all data)
+        addMessage(conversationId, chunk, 'log');
     };
 
     const handleClaudeStreamLine = (line: string) => {
@@ -574,7 +577,7 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         }
 
         job.output += text;
-        // Output is stored in job.output and polled by the client
+        addMessage(conversationId, text, 'log');
     });
 
     // Capture stderr
@@ -582,7 +585,7 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         const text = data.toString('utf-8');
         const errorText = `[stderr] ${text}\n`;
         job.output += errorText;
-        // Output is stored in job.output and polled by the client
+        addMessage(conversationId, errorText, 'error');
     });
 
     agentProcess.on('close', (code: number | null) => {
@@ -647,6 +650,19 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
 
         console.log(`[agent-jobs] Task marked as: ${job.status} (code: ${code}, commitHash: ${commitHash}, successIndicators: ${hasSuccessIndicators}, failureIndicators: ${hasFailureIndicators}, claudeSuccess: ${claudeSuccess}, claudeResultIsError: ${claudeResultIsError})`);
 
+        // Server completes the conversation (ComfyUI pattern: server handles completion)
+        completeConversation(conversationId, {
+            status: job.status,
+            git_commit_hash: commitHash,
+        });
+        addMessage(
+            conversationId,
+            job.status === 'completed'
+                ? `✅ Task completed successfully${commitHash ? ` (commit: ${commitHash})` : ''}`
+                : '❌ Task failed',
+            job.status === 'completed' ? 'success' : 'error',
+        );
+
         // Append to work log file in project directory
         appendToWorkLog(job.projectPath, {
             agentName: job.agentName,
@@ -667,6 +683,9 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         job.status = 'failed';
         job.output += `\n[error] ${error.message}`;
 
+        completeConversation(conversationId, { status: 'failed' });
+        addMessage(conversationId, `❌ Process error: ${error.message}`, 'error');
+
         setTimeout(() => {
             runningJobs.delete(jobId);
         }, 60000);
@@ -682,6 +701,9 @@ export function cancelJob(jobId: string): boolean {
     job.process.kill('SIGTERM');
     job.status = 'failed';
     job.output += '\n[cancelled] Job was cancelled by user';
+
+    completeConversation(job.conversationId, { status: 'cancelled' });
+    addMessage(job.conversationId, '⏹ Job was cancelled by user', 'system');
 
     runningJobs.delete(jobId);
     return true;

@@ -9,10 +9,10 @@ import { MultiSelect } from '@/components/ui/MultiSelect';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
 import {
-    conversationMessageService,
     conversationService,
     projectService,
     ticketService,
+    syncFromServer,
     useConversationMessages,
     useConversations,
     type Conversation,
@@ -183,7 +183,7 @@ export function TicketSidebar({
         window.localStorage.setItem('agentProvider', provider);
     }, [provider, providerLoaded]);
 
-    // Update form fields when ticket changes
+    // Update form fields when ticket changes + sync from server (reconnection)
     useEffect(() => {
         if (ticket) {
             setTitle(ticket.title);
@@ -196,7 +196,18 @@ export function TicketSidebar({
             setExecuting(false);
             setSelectedConversationId(null);
             setCurrentJobId(null);
-            lastOutputRef.current = '';
+            lastSyncRef.current = '';
+
+            // Sync conversations from server on ticket open (ComfyUI pattern: reconnection)
+            // This recovers data if browser was closed during execution
+            fetch(`/api/conversations/sync?ticket_id=${ticket.id}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.conversations?.length > 0 || data.messages?.length > 0) {
+                        syncFromServer.syncAll(data.conversations || [], data.messages || []);
+                    }
+                })
+                .catch(() => { /* server may not have data for old tickets */ });
         }
     }, [ticket?.id]);
 
@@ -229,7 +240,8 @@ export function TicketSidebar({
         }
     }, [ticket, selectedConversationId, sortedConversations]);
 
-    const lastOutputRef = useRef<string>('');
+    // Track last sync timestamp for incremental message fetching
+    const lastSyncRef = useRef<string>('');
 
     useEffect(() => {
         if (!currentJobId || !selectedConversationId) return;
@@ -238,21 +250,24 @@ export function TicketSidebar({
 
         const pollOutput = async () => {
             try {
-                const res = await fetch(`/api/agent/status?job_id=${currentJobId}`);
+                const sinceParam = lastSyncRef.current
+                    ? `&messages_since=${encodeURIComponent(lastSyncRef.current)}`
+                    : '';
+                const res = await fetch(`/api/agent/status?job_id=${currentJobId}${sinceParam}`);
                 const data = await res.json();
                 if (cancelled) return;
 
-                const output = typeof data.output === 'string' ? data.output : '';
-                const previous = lastOutputRef.current;
-                if (output.length > previous.length) {
-                    const delta = output.slice(previous.length);
-                    const cleaned = stripAnsi(delta);
-                    const type =
-                        cleaned.includes('[stderr]') || cleaned.includes('[error]') || /(^|\n)\s*(error:|fatal:)/i.test(cleaned)
-                            ? 'error'
-                            : 'log';
-                    conversationMessageService.create(selectedConversationId, cleaned, type);
-                    lastOutputRef.current = output;
+                // Sync new messages from server into IndexedDB
+                if (data.messages && data.messages.length > 0) {
+                    for (const msg of data.messages) {
+                        syncFromServer.upsertMessage(msg);
+                    }
+                    lastSyncRef.current = data.messages[data.messages.length - 1].created_at;
+                }
+
+                // Also sync conversation status changes
+                if (data.conversation) {
+                    syncFromServer.upsertConversation(data.conversation);
                 }
             } catch (error) {
                 console.error('Failed to fetch job output:', error);
@@ -268,8 +283,9 @@ export function TicketSidebar({
         };
     }, [currentJobId, selectedConversationId]);
 
+    // Poll job status and sync server conversations (ComfyUI pattern)
     useEffect(() => {
-        if (!ticket?.id || !selectedConversationId) return;
+        if (!ticket?.id) return;
 
         let cancelled = false;
         let wasRunning = false;
@@ -279,6 +295,13 @@ export function TicketSidebar({
                 const res = await fetch(`/api/agent/status?ticket_id=${ticket.id}`);
                 const data = await res.json();
                 if (cancelled) return;
+
+                // Sync all server conversations for this ticket into IndexedDB
+                if (data.conversations && data.conversations.length > 0) {
+                    for (const conv of data.conversations) {
+                        syncFromServer.upsertConversation(conv);
+                    }
+                }
 
                 const job = data.job;
                 if (!job) {
@@ -300,29 +323,32 @@ export function TicketSidebar({
                     return;
                 }
 
+                // Job completed - server already handled conversation completion.
+                // Just sync final state and handle client-side notifications.
                 if (wasRunning) {
                     wasRunning = false;
+
                     const completionStatus = job.status === 'completed'
                         ? 'completed'
                         : job.status === 'failed'
                             ? 'failed'
                             : 'cancelled';
-                    const output = typeof job.output === 'string' ? job.output : '';
-                    const commitMatch = output.match(/commit\s+([a-f0-9]{7,40})/i);
-                    const commitHash = commitMatch ? commitMatch[1] : undefined;
-                    conversationService.complete(selectedConversationId, {
-                        status: completionStatus,
-                        git_commit_hash: commitHash,
-                    });
-                    conversationMessageService.create(
-                        selectedConversationId,
-                        completionStatus === 'completed'
-                            ? `✅ Task completed successfully${commitHash ? ` (commit: ${commitHash})` : ''}`
-                            : completionStatus === 'failed'
-                                ? '❌ Task failed'
-                                : '⏹ Job was cancelled by user',
-                        completionStatus === 'completed' ? 'success' : completionStatus === 'failed' ? 'error' : 'system',
-                    );
+
+                    // Sync remaining messages from server
+                    try {
+                        const syncRes = await fetch(`/api/conversations/sync?conversation_id=${job.conversationId}`);
+                        const syncData = await syncRes.json();
+                        if (syncData.conversation) {
+                            syncFromServer.upsertConversation(syncData.conversation);
+                        }
+                        if (syncData.messages) {
+                            for (const msg of syncData.messages) {
+                                syncFromServer.upsertMessage(msg);
+                            }
+                        }
+                    } catch {
+                        // Non-critical: messages may already be synced via output polling
+                    }
 
                     if (completionStatus === 'completed') {
                         setStatus('IN_REVIEW');
@@ -332,14 +358,12 @@ export function TicketSidebar({
                             const agentName = firstAssignee.name;
                             const agentIcon = roleProfileImages[firstAssignee.role] || '/app-icon.png';
 
-                            // Browser notification
                             showNotification(
                                 `✅ ${agentName} 작업 완료!`,
                                 `"${ticket.title}" 작업이 완료되어 리뷰 대기 중입니다.`,
                                 agentIcon,
                             );
 
-                            // Email notification
                             const project = projectService.getActive();
                             sendEmailNotification({
                                 agentName,
@@ -347,7 +371,7 @@ export function TicketSidebar({
                                 ticketTitle: ticket.title,
                                 ticketId: ticket.id,
                                 projectName: project?.name || 'Unknown Project',
-                                commitHash,
+                                commitHash: job.output?.match(/commit\s+([a-f0-9]{7,40})/i)?.[1],
                             });
                         }
                     }
@@ -366,7 +390,7 @@ export function TicketSidebar({
             cancelled = true;
             clearInterval(interval);
         };
-    }, [ticket?.id, selectedConversationId, onTicketUpdate, currentJobId, ticket?.assignees, ticket?.title]);
+    }, [ticket?.id, onTicketUpdate, currentJobId, ticket?.assignees, ticket?.title]);
 
     const persistTicketDetails = async () => {
         if (!ticket) return;
@@ -411,19 +435,7 @@ export function TicketSidebar({
                 throw new Error('Failed to load ticket from database');
             }
 
-            const conversation = conversationService.create({
-                ticket_id: ticket.id,
-                agent_id: agent.id,
-                provider,
-                feedback: feedback.trim() || undefined,
-            });
-
-            conversationMessageService.create(
-                conversation.id,
-                `🚀 ${agent.name} started working on "${persistedTicket.title}"`,
-                'system',
-            );
-
+            // Server creates conversation (ComfyUI pattern: browser is just a remote)
             const res = await fetch('/api/agent/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -447,7 +459,6 @@ export function TicketSidebar({
                         name: project.name,
                         path: project.path,
                     },
-                    conversation_id: conversation.id,
                     feedback: feedback.trim() || undefined,
                     provider,
                 }),
@@ -456,12 +467,17 @@ export function TicketSidebar({
             const data = await res.json();
 
             if (data.success) {
-                if (data.job_id) {
-                    setCurrentJobId(data.job_id);
-                    lastOutputRef.current = '';
+                // Sync server-created conversation into IndexedDB for UI reactivity
+                if (data.conversation) {
+                    syncFromServer.upsertConversation(data.conversation);
                 }
 
-                setSelectedConversationId(conversation.id);
+                if (data.job_id) {
+                    setCurrentJobId(data.job_id);
+                    lastSyncRef.current = '';
+                }
+
+                setSelectedConversationId(data.conversation_id);
                 setFeedback('');
                 setStatus('IN_PROGRESS');
                 onTicketUpdate(ticket.id, { status: 'IN_PROGRESS' });
@@ -486,8 +502,23 @@ export function TicketSidebar({
             const data = await res.json();
 
             if (data.success) {
-                conversationService.complete(selectedConversationId, { status: 'cancelled' });
-                conversationMessageService.create(selectedConversationId, '⏹ Job was cancelled by user', 'system');
+                // Server already handled cancellation in server-store.
+                // Sync the final state from server into IndexedDB.
+                try {
+                    const syncRes = await fetch(`/api/conversations/sync?conversation_id=${selectedConversationId}`);
+                    const syncData = await syncRes.json();
+                    if (syncData.conversation) {
+                        syncFromServer.upsertConversation(syncData.conversation);
+                    }
+                    if (syncData.messages) {
+                        for (const msg of syncData.messages) {
+                            syncFromServer.upsertMessage(msg);
+                        }
+                    }
+                } catch {
+                    // Fallback: manually update IndexedDB if server sync fails
+                    conversationService.complete(selectedConversationId, { status: 'cancelled' });
+                }
                 setExecuting(false);
                 setCurrentJobId(null);
             }
