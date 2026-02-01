@@ -107,6 +107,11 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'custom',
       tags: ['ad-creative', 'copywriting', 'visual-design', 'marketing', 'image-generation'],
     },
+    REACT_SPA: {
+      description: 'CDN 기반 React와 Tailwind CSS로 index.html + client.js 두 파일만으로 완전한 SPA를 개발하는 전문가입니다.',
+      category: 'development',
+      tags: ['react', 'spa', 'tailwind', 'javascript', 'frontend', 'jsx'],
+    },
   };
 
   return metadata[role] || {

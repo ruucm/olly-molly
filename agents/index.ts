@@ -45,6 +45,7 @@ import { recipeAgent } from './recipe';
 import { dystopiaDiaryAgent } from './dystopia-diary';
 import { instagramAnalystAgent } from './instagram-analyst';
 import { adCreatorAgent } from './ad-creator';
+import { reactSpaAgent } from './react-spa';
 
 import type { AgentDefinition } from './types';
 
@@ -66,6 +67,7 @@ export { recipeAgent } from './recipe';
 export { dystopiaDiaryAgent } from './dystopia-diary';
 export { instagramAnalystAgent } from './instagram-analyst';
 export { adCreatorAgent } from './ad-creator';
+export { reactSpaAgent } from './react-spa';
 
 /**
  * Array of all default agents.
@@ -89,4 +91,5 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   dystopiaDiaryAgent,
   instagramAnalystAgent,
   adCreatorAgent,
+  reactSpaAgent,
 ];
