@@ -3,6 +3,27 @@
  * Follows ComfyUI pattern - server owns all execution state.
  */
 
+// ─── Process Signal Handlers for Debugging ─────────────────────────────
+// Log any signals that might cause the process to exit
+if (typeof process !== 'undefined') {
+  const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT'];
+  for (const signal of signals) {
+    process.on(signal, () => {
+      process.stderr.write(`[workflow-store:CRITICAL] Received signal: ${signal}\n`);
+      process.stderr.write(`[workflow-store:CRITICAL] Process will exit due to ${signal}\n`);
+    });
+  }
+
+  process.on('beforeExit', (code) => {
+    process.stdout.write(`[workflow-store:debug] beforeExit event with code: ${code}\n`);
+  });
+
+  process.on('exit', (code) => {
+    // Can only use sync operations here - use stderr as it's synchronous
+    process.stderr.write(`[workflow-store:EXIT] Process exiting with code: ${code}\n`);
+  });
+}
+
 import {
   createConversation,
   addMessage,
@@ -89,8 +110,13 @@ export function createWorkflowExecution(params: {
 
   workflowExecutions.set(id, state);
 
-  // Start the execution loop
-  runWorkflowLoop(id);
+  // Start the execution loop - catch any errors to prevent unhandled rejections
+  runWorkflowLoop(id).then(() => {
+    process.stdout.write(`[workflow-store:debug] runWorkflowLoop Promise resolved for: ${state.workflow_name}\n`);
+  }).catch((error) => {
+    process.stderr.write(`[workflow-store:CRITICAL] runWorkflowLoop Promise rejected: ${error}\n`);
+    process.stderr.write(`[workflow-store:CRITICAL] Stack: ${error instanceof Error ? error.stack : 'no stack'}\n`);
+  });
 
   return state;
 }
@@ -196,14 +222,39 @@ async function runWorkflowLoop(executionId: string): Promise<void> {
     // All nodes completed
     exec.status = 'completed';
     exec.completed_at = new Date().toISOString();
-    console.log(`[workflow-store] Workflow completed: ${exec.workflow_name}`);
+
+    // Use process.stdout.write to ensure synchronous output
+    process.stdout.write(`[workflow-store] Workflow completed: ${exec.workflow_name}\n`);
+    process.stdout.write(`[workflow-store:debug] Status changed to 'completed' for execution ${executionId}\n`);
+
+    // Debug: Check remaining active workflows (wrap in try-catch to see if this causes crash)
+    try {
+      const activeWorkflows = Array.from(workflowExecutions.values()).filter(w => w.status === 'running');
+      process.stdout.write(`[workflow-store:debug] Active workflows remaining: ${activeWorkflows.length}\n`);
+      activeWorkflows.forEach(w => {
+        process.stdout.write(`[workflow-store:debug]   - ${w.workflow_name} (node ${w.current_node_index + 1}/${w.execution_order.length})\n`);
+      });
+      process.stdout.write(`[workflow-store:debug] Workflow loop ending normally for: ${exec.workflow_name}\n`);
+    } catch (debugError) {
+      process.stderr.write(`[workflow-store:CRITICAL] Error in debug logging: ${debugError}\n`);
+    }
 
   } catch (error) {
+    process.stderr.write(`[workflow-store] Workflow execution error: ${error}\n`);
+    process.stderr.write(`[workflow-store] Error stack: ${error instanceof Error ? error.stack : 'no stack'}\n`);
     exec.status = 'failed';
     exec.error = error instanceof Error ? error.message : 'Unknown error';
     exec.completed_at = new Date().toISOString();
-    console.error('[workflow-store] Workflow execution error:', error);
   }
+
+  process.stdout.write(`[workflow-store:debug] runWorkflowLoop() function returning for: ${exec.workflow_name}\n`);
+
+  // Check if all workflows are done
+  const stillRunning = Array.from(workflowExecutions.values()).filter(w => w.status === 'running');
+  process.stdout.write(`[workflow-store:debug] Still running workflows: ${stillRunning.length}\n`);
+
+  // Explicit return to make sure we don't crash here
+  return;
 }
 
 async function executeWorkflowNode(
