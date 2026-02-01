@@ -4,6 +4,21 @@ import path from 'path';
 import net from 'net';
 import { addMessage, completeConversation } from './server-store';
 
+// ─── Global Error Handlers for Debugging ─────────────────────────────
+// These help catch errors that might cause the process to crash
+
+if (typeof process !== 'undefined') {
+    process.on('uncaughtException', (error) => {
+        console.error('[agent-jobs:CRITICAL] Uncaught Exception:', error);
+        console.error('[agent-jobs:CRITICAL] Stack:', error.stack);
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error('[agent-jobs:CRITICAL] Unhandled Rejection at:', promise);
+        console.error('[agent-jobs:CRITICAL] Reason:', reason);
+    });
+}
+
 export type AgentProvider = 'claude' | 'opencode' | 'codex';
 
 const CLAUDE_CMD = 'claude';
@@ -522,13 +537,29 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         spawnEnv.OPENCODE_PERMISSION = '"allow"';
     }
 
-    const agentProcess = spawn(execPath, args, {
-        cwd: projectPath,
-        env: spawnEnv as NodeJS.ProcessEnv,
-        shell: isWindows,
-        detached: !isWindows, // Detach on Unix to prevent parent termination
-        stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // Debug: Log spawn details
+    console.log(`[agent-jobs] Spawning process...`);
+    console.log(`[agent-jobs]   command: ${execPath}`);
+    console.log(`[agent-jobs]   args: ${JSON.stringify(args)}`);
+    console.log(`[agent-jobs]   cwd: ${projectPath}`);
+    console.log(`[agent-jobs]   shell: ${isWindows}`);
+    console.log(`[agent-jobs]   envKeys: ${Object.keys(spawnEnv).length}`);
+
+    let agentProcess: ReturnType<typeof spawn>;
+    try {
+        agentProcess = spawn(execPath, args, {
+            cwd: projectPath,
+            env: spawnEnv as NodeJS.ProcessEnv,
+            shell: isWindows,
+            detached: !isWindows, // Detach on Unix to prevent parent termination
+            stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        console.log(`[agent-jobs] Process spawned successfully, pid: ${agentProcess.pid}`);
+    } catch (spawnError) {
+        console.error(`[agent-jobs] CRITICAL: spawn() threw synchronously:`, spawnError);
+        logDebugState('spawn-sync-error');
+        throw spawnError;
+    }
 
     // Unref so the parent process can exit independently (but we still capture output)
     if (!isWindows) {
@@ -537,8 +568,15 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
 
     if (useStdin) {
         // Write prompt to stdin
-        agentProcess.stdin?.write(prompt);
-        agentProcess.stdin?.end();
+        console.log(`[agent-jobs] Writing prompt to stdin (${prompt.length} chars)...`);
+        try {
+            agentProcess.stdin?.write(prompt);
+            agentProcess.stdin?.end();
+            console.log(`[agent-jobs] Stdin write completed`);
+        } catch (stdinError) {
+            console.error(`[agent-jobs] CRITICAL: stdin write failed:`, stdinError);
+            logDebugState('stdin-write-error');
+        }
     }
 
     const job: RunningJob = {
