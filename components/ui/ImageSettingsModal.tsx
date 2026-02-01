@@ -8,8 +8,9 @@ import {
     saveNotificationSettings,
     type NotificationSettings,
 } from '@/lib/notification-settings';
+import { userSettingsService } from '@/lib/client-db';
 
-type SettingsTab = 'image' | 'notification';
+type SettingsTab = 'image' | 'notification' | 'account';
 
 export interface ImageGeneratorSettings {
     provider: 'comfyui' | 'nanobanana' | 'off';
@@ -89,6 +90,10 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
     const [emailConfigured, setEmailConfigured] = useState<boolean | null>(null);
     const [fromEmail, setFromEmail] = useState<string | undefined>();
 
+    // Account settings
+    const [userEmail, setUserEmail] = useState<string | null>(null);
+    const [loggingOut, setLoggingOut] = useState(false);
+
     useEffect(() => {
         if (isOpen) {
             loadImageSettingsFromServer().then(setSettings);
@@ -98,6 +103,9 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
             // Load notification settings
             const notifSettings = getNotificationSettings();
             setNotificationSettings(notifSettings);
+
+            // Load user email
+            userSettingsService.getEmail().then(setUserEmail);
 
             // Check if email is configured on server
             fetch('/api/notification/settings')
@@ -111,6 +119,20 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
                 });
         }
     }, [isOpen]);
+
+    const handleLogout = async () => {
+        if (!window.confirm('로그아웃하면 다른 이메일로 로그인할 수 있습니다. 진행할까요?')) {
+            return;
+        }
+        setLoggingOut(true);
+        try {
+            await userSettingsService.clear();
+            window.location.reload();
+        } catch (error) {
+            console.error('Failed to logout:', error);
+            setLoggingOut(false);
+        }
+    };
 
     const handleSave = async () => {
         setSaving(true);
@@ -192,6 +214,16 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
                         }`}
                     >
                         🔔 알림
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('account')}
+                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                            activeTab === 'account'
+                                ? 'border-[var(--accent-primary)] text-[var(--accent-primary)]'
+                                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                        }`}
+                    >
+                        👤 계정
                     </button>
                 </div>
 
@@ -408,6 +440,45 @@ SES_FROM_EMAIL=noreply@yourdomain.com`}
                                     />
                                 </div>
                             )}
+                        </div>
+                    </>
+                )}
+
+                {/* Account Settings Tab */}
+                {activeTab === 'account' && (
+                    <>
+                        {/* Current Email */}
+                        <div>
+                            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-2">
+                                현재 로그인 이메일
+                            </label>
+                            <div className="px-3 py-2 text-sm bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-primary)]">
+                                {userEmail || '없음'}
+                            </div>
+                            <p className="mt-2 text-xs text-[var(--text-muted)]">
+                                📁 프로젝트 경로: ~/Projects/{userEmail ? userSettingsService.emailToDir(userEmail) : '...'}
+                            </p>
+                        </div>
+
+                        {/* Logout */}
+                        <div className="pt-4 border-t border-[var(--border-primary)]">
+                            <div className="mb-3">
+                                <div className="text-sm font-medium text-[var(--text-primary)]">
+                                    로그아웃
+                                </div>
+                                <div className="text-xs text-[var(--text-muted)]">
+                                    로그아웃 후 다른 이메일로 로그인할 수 있습니다.
+                                    로컬 데이터는 유지됩니다.
+                                </div>
+                            </div>
+                            <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={handleLogout}
+                                disabled={loggingOut}
+                            >
+                                {loggingOut ? '로그아웃 중...' : '로그아웃'}
+                            </Button>
                         </div>
                     </>
                 )}

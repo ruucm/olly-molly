@@ -1407,6 +1407,11 @@ export const userSettingsService = {
     const settings = await this.get();
     return settings?.email || null;
   },
+  // Clear user settings (logout)
+  async clear(): Promise<void> {
+    const db = await getIdb();
+    await db.delete(STORE_NAMES.meta, 'user_settings');
+  },
   // Convert email to safe directory name
   emailToDir(email: string): string {
     return email.replace(/@/g, '_at_').replace(/\./g, '_');
