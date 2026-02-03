@@ -84,11 +84,17 @@ async function findAvailablePort(startPort = 3001): Promise<number> {
 
 // Common instructions prepended to all agent prompts
 const PORT_SAFETY_INSTRUCTIONS = `
-⚠️ 포트 규칙:
-- localhost:1234는 Olly Molly 앱입니다. 접근하지 마세요.
-- dev 서버 포트: 환경변수 AVAILABLE_PORT (값: $AVAILABLE_PORT) — 이미 확인된 빈 포트입니다. 추가 스캔 없이 바로 사용하세요.
-- 서버 시작: npm run dev -- --port $AVAILABLE_PORT
-- 브라우저 테스트: http://localhost:$AVAILABLE_PORT
+🚨 CRITICAL PORT SAFETY RULES (MUST FOLLOW):
+1. RESERVED PORTS - NEVER TOUCH: 1234, 31337, 3000 are used by Olly Molly. NEVER:
+   - Kill processes on these ports (no kill, pkill, lsof -t, fuser -k, etc.)
+   - Stop or restart services on these ports
+   - Navigate Playwright to localhost:1234 or localhost:3000
+
+2. If a port is in use: Find another available port. NEVER kill the existing process.
+
+3. For dev servers: Use any port EXCEPT 1234, 31337 and 3000. Let the framework auto-select or use ports like 3001, 3002, 4000, 5000, 8080, etc.
+
+4. Before killing ANY process on ANY port, verify it's not port 1234 or 3000.
 
 `;
 

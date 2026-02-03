@@ -48,9 +48,11 @@ function buildAgentPrompt(ticket: {
     const isQA = agent.role === 'QA';
     const qaInstruction = isQA
         ? `\nIMPORTANT:
-1. PORT: Use the pre-assigned port from env var AVAILABLE_PORT (or DEV_PORT). It is already verified available. Do NOT scan for ports yourself — just use it directly: npm run dev -- --port $AVAILABLE_PORT
-2. TOOL USAGE: You MUST use the **Playwright MCP** tools for automated testing. Navigate to http://localhost:$AVAILABLE_PORT for browser tests.
-3. CLEANUP: After running tests, STOP any dev servers you started to free up ports for other agents.`
+1. 🚨 NEVER KILL PROCESSES ON PORTS 1234 OR 31337 OR 3000 - These are Olly Molly system ports. Killing them will crash the app.
+2. PORT: Use env var AVAILABLE_PORT if set, or find an available port yourself (skip 1234, 3000).
+3. TOOL USAGE: Use Playwright MCP for automated testing. NEVER navigate to localhost:1234 or localhost:3000.
+4. CLEANUP: After tests, stop only the dev servers YOU started. Never kill processes you didn't start.
+5. If a port is busy: Choose a different port. NEVER kill existing processes.`
         : '';
 
     // Image generation instruction based on member capability
@@ -72,10 +74,11 @@ If you need images for your implementation (backgrounds, icons, illustrations, e
     const screenshotInstruction = canLogScreenshots
         ? `\n\nSCREENSHOT REQUIREMENT:
 If you make any UI/visual changes, you MUST take screenshots to document your work:
-1. Start the dev server on the pre-assigned port: npm run dev -- --port $AVAILABLE_PORT (the port is already verified available, do NOT scan for ports)
-2. Use Playwright MCP to navigate to http://localhost:$AVAILABLE_PORT and capture screenshots
+1. Start the dev server on an available port (NEVER use 1234 or 3000 - these are Olly Molly system ports)
+2. Use Playwright MCP to capture screenshots (NEVER navigate to localhost:1234 or localhost:3000)
 3. Save screenshots to ".agent-screenshots/" in the project root with descriptive names
-4. AFTER taking screenshots, STOP the dev server immediately to free up the port
+4. AFTER taking screenshots, STOP only the dev server YOU started
+5. 🚨 NEVER kill processes on ports 1234 or 3000 - this will crash Olly Molly
 This is MANDATORY for visual changes so other agents can reference your work.`
         : '';
 
