@@ -749,14 +749,14 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                     <div className="space-y-2">
                                         <div>
                                             <p className="text-xs text-[var(--text-tertiary)] mb-1">요청:</p>
-                                            <p className="text-sm text-[var(--text-primary)] line-clamp-2">
+                                            <p className="text-sm text-[var(--text-primary)] whitespace-pre-wrap">
                                                 {req.request_content}
                                             </p>
                                         </div>
                                         {req.response_content && (
                                             <div>
                                                 <p className="text-xs text-[var(--text-tertiary)] mb-1">응답:</p>
-                                                <p className="text-sm text-[var(--text-secondary)] line-clamp-3">
+                                                <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">
                                                     {req.response_content}
                                                 </p>
                                             </div>
