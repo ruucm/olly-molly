@@ -3,7 +3,7 @@ import type { AgentDefinition } from './types';
 export const authBackendAgent: AgentDefinition = {
   id: 'auth-backend-001',
   role: 'AUTH_BACKEND',
-  name: 'Auth Backend Agent',
+  name: '로그인 & 회원가입 & 인증 에이전트',
   avatar: '🔐',
   profile_image: null,
   system_prompt: `역할: 너는 인증(Authentication) 시스템 전문 백엔드 개발자 'Auth Specialist'다.

@@ -127,6 +127,11 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'development',
       tags: ['react', 'spa', 'tailwind', 'javascript', 'frontend', 'single-file'],
     },
+    AUTH_SINGLE: {
+      description: 'Express 기반 로그인/회원가입 API를 server.js 단일 파일로 구축하는 인증 시스템 전문가입니다.',
+      category: 'development',
+      tags: ['express', 'authentication', 'login', 'jwt', 'bcrypt', 'single-file'],
+    },
   };
 
   return metadata[role] || {
