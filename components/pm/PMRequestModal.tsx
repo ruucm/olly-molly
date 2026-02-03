@@ -58,6 +58,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
     const [workflowStatus, setWorkflowStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
     const [answer, setAnswer] = useState<string | null>(null);
     const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+    const [maxTickets, setMaxTickets] = useState<string>('');
 
     const projects = useProjects();
     const project = useMemo(() => projects.find((item) => item.id === projectId) || null, [projects, projectId]);
@@ -134,6 +135,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                     provider,
                     existing_tickets: existingTickets,
                     team_members: teamMembers,
+                    max_tickets: maxTickets ? parseInt(maxTickets, 10) : undefined,
                 }),
             });
 
@@ -298,6 +300,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
         setError(null);
         setWorkflowStatus('idle');
         setIsExecutingWorkflow(false);
+        setMaxTickets('');
         onClose();
     };
 
@@ -481,6 +484,27 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                 {selectedMemberIds.length === 0 && (
                                     <p className="text-xs text-amber-400">⚠️ 최소 1명의 멤버를 선택해주세요</p>
                                 )}
+                            </div>
+
+                            {/* Max Tickets Limit */}
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-[var(--text-secondary)]">
+                                    티켓 개수 제한 <span className="text-[var(--text-muted)] font-normal">(선택)</span>
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="20"
+                                        value={maxTickets}
+                                        onChange={(e) => setMaxTickets(e.target.value)}
+                                        placeholder="제한 없음"
+                                        className="w-24 px-3 py-1.5 text-sm rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)]"
+                                    />
+                                    <span className="text-sm text-[var(--text-tertiary)]">
+                                        {maxTickets ? `최대 ${maxTickets}개 티켓 생성` : '제한 없이 PM이 결정'}
+                                    </span>
+                                </div>
                             </div>
 
                             <Textarea

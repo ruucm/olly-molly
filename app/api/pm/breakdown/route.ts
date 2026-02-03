@@ -35,7 +35,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
     BUG_HUNTER: 'Bug Hunter: Full Stack Developer specialized in quickly fixing bugs, debugging, and hotfixes',
 };
 
-function buildSystemPrompt(existingTickets?: ExistingTicket[], teamMembers?: TeamMember[]): string {
+function buildSystemPrompt(existingTickets?: ExistingTicket[], teamMembers?: TeamMember[], maxTickets?: number): string {
     // Build team description dynamically based on provided members
     let teamDescription = '';
     const availableRoles: string[] = [];
@@ -74,7 +74,7 @@ IMPORTANT RULES:
 - Use Korean for titles and descriptions
 - AVOID creating duplicate tasks that already exist on the board
 - ORDER tasks by execution sequence (tasks that must be done first should come first)
-- PREFIX each task title with a sequence number (e.g., "1. 로그인 화면 UI 구현", "2. 백엔드 API 연동")`;
+- PREFIX each task title with a sequence number (e.g., "1. 로그인 화면 UI 구현", "2. 백엔드 API 연동")${maxTickets ? `\n- CRITICAL: You MUST create AT MOST ${maxTickets} tasks. Prioritize the most important tasks if you need to limit.` : ''}`;
 
     if (existingTickets && existingTickets.length > 0) {
         prompt += `\n\n## EXISTING TICKETS ON THE BOARD\nThe following tickets already exist. Avoid creating duplicate or overlapping tasks:\n`;
@@ -159,9 +159,9 @@ function classifyCliError(raw: string): { status: number; publicMessage: string 
     return { status: 500, publicMessage: 'Failed to run CLI.' };
 }
 
-async function breakdownWithCLI(cli: SupportedCLI, request: string, projectPath: string, existingTickets?: ExistingTicket[], teamMembers?: TeamMember[]): Promise<{ tasks: TaskFromAI[]; summary: string }> {
+async function breakdownWithCLI(cli: SupportedCLI, request: string, projectPath: string, existingTickets?: ExistingTicket[], teamMembers?: TeamMember[], maxTickets?: number): Promise<{ tasks: TaskFromAI[]; summary: string }> {
 
-    const systemPrompt = buildSystemPrompt(existingTickets, teamMembers);
+    const systemPrompt = buildSystemPrompt(existingTickets, teamMembers, maxTickets);
     const fullPrompt = `${systemPrompt}\n\nFeature Request: ${request}`;
 
     return new Promise((resolve, reject) => {
@@ -290,7 +290,8 @@ export async function POST(request: NextRequest) {
         // Run ONLY the requested provider (no fallback)
         const existingTickets = Array.isArray(body.existing_tickets) ? body.existing_tickets : [];
         const teamMembers = Array.isArray(body.team_members) ? body.team_members : undefined;
-        const aiResponse = await breakdownWithCLI(requestedProvider, body.request, projectPath, existingTickets, teamMembers);
+        const maxTickets = typeof body.max_tickets === 'number' && body.max_tickets > 0 ? body.max_tickets : undefined;
+        const aiResponse = await breakdownWithCLI(requestedProvider, body.request, projectPath, existingTickets, teamMembers, maxTickets);
 
         return NextResponse.json({
             success: true,
