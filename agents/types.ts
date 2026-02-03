@@ -122,6 +122,11 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'development',
       tags: ['tosspayments', 'payment', 'checkout', 'widget', 'fintech', 'e-commerce'],
     },
+    REACT_SINGLE: {
+      description: 'CDN 기반 React와 Tailwind CSS로 index.html 단일 파일만으로 완전한 SPA를 개발하는 전문가입니다.',
+      category: 'development',
+      tags: ['react', 'spa', 'tailwind', 'javascript', 'frontend', 'single-file'],
+    },
   };
 
   return metadata[role] || {

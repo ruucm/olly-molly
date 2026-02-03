@@ -48,6 +48,7 @@ import { adCreatorAgent } from './ad-creator';
 import { reactSpaAgent } from './react-spa';
 import { authBackendAgent } from './auth-backend';
 import { tosspaymentsAgent } from './tosspayments';
+import { reactSingleAgent } from './react-single';
 
 import type { AgentDefinition } from './types';
 
@@ -72,6 +73,7 @@ export { adCreatorAgent } from './ad-creator';
 export { reactSpaAgent } from './react-spa';
 export { authBackendAgent } from './auth-backend';
 export { tosspaymentsAgent } from './tosspayments';
+export { reactSingleAgent } from './react-single';
 
 /**
  * Array of all default agents.
@@ -98,4 +100,5 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   reactSpaAgent,
   authBackendAgent,
   tosspaymentsAgent,
+  reactSingleAgent,
 ];
