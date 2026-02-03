@@ -6,7 +6,8 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
-import { memberService, ticketService, workflowService, workflowNodeService, workflowEdgeService, useProjects, useMembers } from '@/lib/client-db';
+import { memberService, ticketService, workflowService, workflowNodeService, workflowEdgeService, useProjects, useMembers, usePmRequests, pmRequestService } from '@/lib/client-db';
+import type { PmRequest } from '@/lib/client-db';
 import type { AgentProvider } from '@/lib/agent-jobs';
 import { executeWorkflow } from '@/lib/workflow-executor';
 
@@ -36,7 +37,7 @@ interface PMRequestModalProps {
     projectId?: string;
 }
 
-type TabType = 'request' | 'ask';
+type TabType = 'request' | 'ask' | 'history';
 
 export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }: PMRequestModalProps) {
     const [activeTab, setActiveTab] = useState<TabType>('request');
@@ -64,6 +65,9 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
     // Get all members except PM (PM is the assigner, not assignee)
     const allMembers = useMembers();
     const assignableMembers = useMemo(() => allMembers.filter(m => m.role !== 'PM'), [allMembers]);
+
+    // PM Request history
+    const pmRequests = usePmRequests(projectId);
 
     // Reset selected members when modal closes
     useEffect(() => {
@@ -217,6 +221,20 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                     workflowName,
                 });
                 setWorkflowStatus('idle');
+
+                // Save to PM request history
+                if (projectId) {
+                    pmRequestService.create({
+                        project_id: projectId,
+                        request_type: 'breakdown',
+                        request_content: request.trim(),
+                        response_content: data.ai_summary || `${createdTickets.length}개의 태스크 생성됨`,
+                        provider,
+                        tasks_created: createdTickets.length,
+                        workflow_id: workflowId,
+                    });
+                }
+
                 onTicketsCreated();
             }
         } catch (err) {
@@ -252,6 +270,17 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
 
             if (data.success) {
                 setAnswer(data.answer);
+
+                // Save to PM request history
+                if (projectId) {
+                    pmRequestService.create({
+                        project_id: projectId,
+                        request_type: 'ask',
+                        request_content: question.trim(),
+                        response_content: data.answer,
+                        provider,
+                    });
+                }
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An error occurred');
@@ -399,6 +428,15 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                         }`}
                 >
                     💬 질문하기
+                </button>
+                <button
+                    onClick={() => { setActiveTab('history'); setError(null); }}
+                    className={`px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'history'
+                        ? 'text-[var(--accent-primary)] border-b-2 border-[var(--accent-primary)]'
+                        : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                        }`}
+                >
+                    📋 요청 내역 {pmRequests.length > 0 && <span className="ml-1 text-xs bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded-full">{pmRequests.length}</span>}
                 </button>
             </div>
 
@@ -627,6 +665,110 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                 <>💬 {providerLabel}로 질문하기</>
                             )}
                         </Button>
+                    </div>
+                </div>
+            )}
+
+            {/* History Tab */}
+            {activeTab === 'history' && (
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <p className="text-sm text-[var(--text-tertiary)]">
+                            {pmRequests.length > 0
+                                ? `총 ${pmRequests.length}개의 요청 내역이 있습니다.`
+                                : '아직 요청 내역이 없습니다.'}
+                        </p>
+                        {pmRequests.length > 0 && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                    if (projectId && confirm('모든 요청 내역을 삭제하시겠습니까?')) {
+                                        pmRequestService.deleteAll(projectId);
+                                    }
+                                }}
+                                className="text-red-400 hover:text-red-300"
+                            >
+                                🗑️ 전체 삭제
+                            </Button>
+                        )}
+                    </div>
+
+                    {pmRequests.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
+                            <span className="text-4xl mb-3">📋</span>
+                            <p className="text-sm">PM에게 요청하면 여기에 기록됩니다.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                            {pmRequests.map((req) => (
+                                <div
+                                    key={req.id}
+                                    className="p-4 bg-[var(--bg-tertiary)] rounded-lg border border-[var(--border-primary)] group"
+                                >
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-sm px-2 py-0.5 rounded-full ${
+                                                req.request_type === 'breakdown'
+                                                    ? 'bg-indigo-500/20 text-indigo-400'
+                                                    : 'bg-emerald-500/20 text-emerald-400'
+                                            }`}>
+                                                {req.request_type === 'breakdown' ? '🛠️ 작업 요청' : '💬 질문'}
+                                            </span>
+                                            <span className="text-xs text-[var(--text-muted)]">
+                                                {req.provider === 'claude' ? '🟠' : req.provider === 'codex' ? '🔵' : '⚪️'} {req.provider}
+                                            </span>
+                                            {req.tasks_created > 0 && (
+                                                <span className="text-xs text-amber-400">
+                                                    +{req.tasks_created} 태스크
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-[var(--text-muted)]">
+                                                {new Date(req.created_at).toLocaleString('ko-KR', {
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit',
+                                                })}
+                                            </span>
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm('이 요청 내역을 삭제하시겠습니까?')) {
+                                                        pmRequestService.delete(req.id);
+                                                    }
+                                                }}
+                                                className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-all"
+                                                title="삭제"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div>
+                                            <p className="text-xs text-[var(--text-tertiary)] mb-1">요청:</p>
+                                            <p className="text-sm text-[var(--text-primary)] line-clamp-2">
+                                                {req.request_content}
+                                            </p>
+                                        </div>
+                                        {req.response_content && (
+                                            <div>
+                                                <p className="text-xs text-[var(--text-tertiary)] mb-1">응답:</p>
+                                                <p className="text-sm text-[var(--text-secondary)] line-clamp-3">
+                                                    {req.response_content}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="flex justify-end">
+                        <Button variant="ghost" onClick={handleClose}>닫기</Button>
                     </div>
                 </div>
             )}

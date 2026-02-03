@@ -144,8 +144,20 @@ export interface WorkflowEdge {
   created_at: string;
 }
 
+export interface PmRequest {
+  id: string;
+  project_id: string;
+  request_type: 'breakdown' | 'ask';
+  request_content: string;
+  response_content: string | null;
+  provider: 'claude' | 'opencode' | 'codex';
+  tasks_created: number;
+  workflow_id: string | null;
+  created_at: string;
+}
+
 const DB_NAME = 'olly-molly';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 const STORE_NAMES = {
   members: 'members',
@@ -159,6 +171,7 @@ const STORE_NAMES = {
   workflows: 'workflows',
   workflowNodes: 'workflow_nodes',
   workflowEdges: 'workflow_edges',
+  pmRequests: 'pm_requests',
   sqliteDump: 'sqlite_dump',
   meta: 'meta',
 } as const;
@@ -181,6 +194,7 @@ const BACKUP_STORE_NAMES: StoreName[] = [
   STORE_NAMES.workflows,
   STORE_NAMES.workflowNodes,
   STORE_NAMES.workflowEdges,
+  STORE_NAMES.pmRequests,
   STORE_NAMES.meta,
 ];
 
@@ -293,6 +307,9 @@ function getIdb(): Promise<IDBPDatabase> {
         }
         if (!db.objectStoreNames.contains(STORE_NAMES.workflowEdges)) {
           db.createObjectStore(STORE_NAMES.workflowEdges, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_NAMES.pmRequests)) {
+          db.createObjectStore(STORE_NAMES.pmRequests, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(STORE_NAMES.sqliteDump)) {
           db.createObjectStore(STORE_NAMES.sqliteDump, { keyPath: 'id' });
@@ -668,6 +685,7 @@ const conversationMessagesCollection = createIndexedDbCollectionWithOptions<Conv
 const workflowsCollection = createIndexedDbCollection<Workflow>(STORE_NAMES.workflows);
 const workflowNodesCollection = createIndexedDbCollection<WorkflowNode>(STORE_NAMES.workflowNodes);
 const workflowEdgesCollection = createIndexedDbCollection<WorkflowEdge>(STORE_NAMES.workflowEdges);
+const pmRequestsCollection = createIndexedDbCollection<PmRequest>(STORE_NAMES.pmRequests);
 
 let initPromise: Promise<void> | null = null;
 
@@ -1366,6 +1384,64 @@ export const workflowEdgeService = {
   },
 };
 
+export function usePmRequests(projectId?: string) {
+  const { data } = useLiveQuery(() => pmRequestsCollection);
+  const requests = (data ?? []) as PmRequest[];
+  if (projectId) {
+    return requests
+      .filter((r) => r.project_id === projectId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+  return requests.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
+
+export const pmRequestService = {
+  getAll(projectId?: string): PmRequest[] {
+    const requests = Array.from(pmRequestsCollection.values());
+    if (projectId) {
+      return requests
+        .filter((r) => r.project_id === projectId)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    return requests.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  },
+  getById(id: string): PmRequest | undefined {
+    return pmRequestsCollection.get(id);
+  },
+  create(data: {
+    project_id: string;
+    request_type: 'breakdown' | 'ask';
+    request_content: string;
+    response_content?: string;
+    provider: 'claude' | 'opencode' | 'codex';
+    tasks_created?: number;
+    workflow_id?: string;
+  }): PmRequest {
+    const request: PmRequest = {
+      id: uuidv4(),
+      project_id: data.project_id,
+      request_type: data.request_type,
+      request_content: data.request_content,
+      response_content: data.response_content || null,
+      provider: data.provider,
+      tasks_created: data.tasks_created || 0,
+      workflow_id: data.workflow_id || null,
+      created_at: new Date().toISOString(),
+    };
+    pmRequestsCollection.insert(request);
+    return request;
+  },
+  delete(id: string): boolean {
+    pmRequestsCollection.delete(id);
+    return true;
+  },
+  deleteAll(projectId: string): number {
+    const requests = this.getAll(projectId);
+    requests.forEach((r) => pmRequestsCollection.delete(r.id));
+    return requests.length;
+  },
+};
+
 export const collections = {
   membersCollection,
   marketAgentsCollection,
@@ -1378,6 +1454,7 @@ export const collections = {
   workflowsCollection,
   workflowNodesCollection,
   workflowEdgesCollection,
+  pmRequestsCollection,
 };
 
 // User Settings (stored in meta store)
