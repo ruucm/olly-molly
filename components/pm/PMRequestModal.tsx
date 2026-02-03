@@ -232,6 +232,7 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                         provider,
                         tasks_created: createdTickets.length,
                         workflow_id: workflowId,
+                        selected_member_ids: selectedMemberIds,
                     });
                 }
 
@@ -747,6 +748,22 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                         </div>
                                     </div>
                                     <div className="space-y-2">
+                                        {/* 선택된 에이전트 표시 */}
+                                        {req.selected_member_ids && req.selected_member_ids.length > 0 && (
+                                            <div className="flex flex-wrap gap-1">
+                                                {req.selected_member_ids.map(memberId => {
+                                                    const member = allMembers.find(m => m.id === memberId);
+                                                    return member ? (
+                                                        <span
+                                                            key={memberId}
+                                                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-[var(--bg-secondary)] text-[var(--text-tertiary)] rounded-full"
+                                                        >
+                                                            {member.avatar} {member.name}
+                                                        </span>
+                                                    ) : null;
+                                                })}
+                                            </div>
+                                        )}
                                         <div>
                                             <p className="text-xs text-[var(--text-tertiary)] mb-1">요청:</p>
                                             <p className="text-sm text-[var(--text-primary)] whitespace-pre-wrap">

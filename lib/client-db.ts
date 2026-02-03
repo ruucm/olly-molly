@@ -153,6 +153,7 @@ export interface PmRequest {
   provider: 'claude' | 'opencode' | 'codex';
   tasks_created: number;
   workflow_id: string | null;
+  selected_member_ids: string[];
   created_at: string;
 }
 
@@ -1416,6 +1417,7 @@ export const pmRequestService = {
     provider: 'claude' | 'opencode' | 'codex';
     tasks_created?: number;
     workflow_id?: string;
+    selected_member_ids?: string[];
   }): PmRequest {
     const request: PmRequest = {
       id: uuidv4(),
@@ -1426,6 +1428,7 @@ export const pmRequestService = {
       provider: data.provider,
       tasks_created: data.tasks_created || 0,
       workflow_id: data.workflow_id || null,
+      selected_member_ids: data.selected_member_ids || [],
       created_at: new Date().toISOString(),
     };
     pmRequestsCollection.insert(request);
