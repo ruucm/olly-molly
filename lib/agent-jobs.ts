@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import net from 'net';
 import { addMessage, completeConversation } from './server-store';
+import { runAgenticLoop, getConfiguredModel as getAnthropicModel, isConfigured as isAnthropicConfigured } from './anthropic';
 
 // ─── Global Error Handlers for Debugging ─────────────────────────────
 // These help catch errors that might cause the process to crash
@@ -35,7 +36,7 @@ if (typeof process !== 'undefined') {
     }, 10000).unref(); // unref() so this doesn't keep the process alive
 }
 
-export type AgentProvider = 'claude' | 'opencode' | 'codex';
+export type AgentProvider = 'claude' | 'opencode' | 'codex' | 'anthropic-api';
 
 const CLAUDE_CMD = 'claude';
 const OPENCODE_CMD = 'opencode';
@@ -139,7 +140,8 @@ interface RunningJob {
     projectPath: string;
     provider: AgentProvider;
     startedAt: Date;
-    process: ChildProcess;
+    process: ChildProcess | null;
+    abortController: AbortController | null;
     output: string;
     status: 'running' | 'completed' | 'failed';
 }
@@ -183,7 +185,7 @@ function startDebugInterval(): void {
     }, 30000);
 }
 
-export function getRunningJobs(): Omit<RunningJob, 'process'>[] {
+export function getRunningJobs(): Omit<RunningJob, 'process' | 'abortController'>[] {
     return Array.from(runningJobs.values()).map(job => ({
         id: job.id,
         conversationId: job.conversationId,
@@ -198,7 +200,7 @@ export function getRunningJobs(): Omit<RunningJob, 'process'>[] {
     }));
 }
 
-export function getJobByTicketId(ticketId: string): Omit<RunningJob, 'process'> | null {
+export function getJobByTicketId(ticketId: string): Omit<RunningJob, 'process' | 'abortController'> | null {
     for (const job of runningJobs.values()) {
         if (job.ticketId === ticketId) {
             return {
@@ -218,7 +220,7 @@ export function getJobByTicketId(ticketId: string): Omit<RunningJob, 'process'> 
     return null;
 }
 
-export function getJobById(jobId: string): Omit<RunningJob, 'process'> | null {
+export function getJobById(jobId: string): Omit<RunningJob, 'process' | 'abortController'> | null {
     const job = runningJobs.get(jobId);
     if (!job) return null;
     return {
@@ -486,6 +488,22 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
     logDebugState('job-start');
     startDebugInterval();
 
+    // Handle anthropic-api provider separately
+    if (provider === 'anthropic-api') {
+        await startAnthropicApiJob({
+            jobId,
+            conversationId,
+            ticketId,
+            ticketTitle,
+            agentId,
+            agentName,
+            agentAvatar,
+            projectPath,
+            prompt: originalPrompt,
+        });
+        return;
+    }
+
     // Find an available port for the agent to use
     const availablePort = await findAvailablePort(3001);
     console.log(`[agent-jobs] Found available port: ${availablePort}`);
@@ -605,6 +623,7 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         provider,
         startedAt: new Date(),
         process: agentProcess,
+        abortController: null,
         output: startMessage,
         status: 'running',
     };
@@ -815,7 +834,16 @@ export function cancelJob(jobId: string): boolean {
         return false;
     }
 
-    job.process.kill('SIGTERM');
+    // Handle anthropic-api jobs with AbortController
+    if (job.abortController) {
+        job.abortController.abort();
+    }
+
+    // Handle CLI-based jobs with process kill
+    if (job.process) {
+        job.process.kill('SIGTERM');
+    }
+
     job.status = 'failed';
     job.output += '\n[cancelled] Job was cancelled by user';
 
@@ -824,4 +852,174 @@ export function cancelJob(jobId: string): boolean {
 
     runningJobs.delete(jobId);
     return true;
+}
+
+// ─── Anthropic API Direct Integration ─────────────────────────────────
+
+interface AnthropicJobParams {
+    jobId: string;
+    conversationId: string;
+    ticketId: string;
+    ticketTitle: string;
+    agentId: string;
+    agentName: string;
+    agentAvatar?: string | null;
+    projectPath: string;
+    prompt: string;
+}
+
+/**
+ * Start a job using the Anthropic API directly with tool use (agentic loop)
+ */
+async function startAnthropicApiJob(params: AnthropicJobParams): Promise<void> {
+    const { jobId, conversationId, ticketId, ticketTitle, agentId, agentName, agentAvatar, projectPath, prompt } = params;
+
+    // Check if Anthropic API is configured
+    if (!isAnthropicConfigured()) {
+        console.error('[agent-jobs] ANTHROPIC_API_KEY is not set');
+        addMessage(conversationId, '❌ ANTHROPIC_API_KEY environment variable is not set', 'error');
+        completeConversation(conversationId, { status: 'failed' });
+        return;
+    }
+
+    const modelLabel = getAnthropicModel();
+    const startMessage = `🚀 Starting Anthropic API (Direct) in ${projectPath}...\nModel: ${modelLabel}\n\n`;
+
+    // Create AbortController for cancellation
+    const abortController = new AbortController();
+
+    // Create the job entry
+    const job: RunningJob = {
+        id: jobId,
+        conversationId,
+        ticketId,
+        agentId,
+        agentName,
+        projectPath,
+        provider: 'anthropic-api',
+        startedAt: new Date(),
+        process: null,
+        abortController,
+        output: startMessage,
+        status: 'running',
+    };
+
+    runningJobs.set(jobId, job);
+    addMessage(conversationId, startMessage, 'log');
+
+    // System prompt for the agent
+    const systemPrompt = `You are an AI coding agent working in the directory: ${projectPath}
+
+You have access to the following tools:
+- read_file: Read file contents
+- write_file: Create or overwrite files
+- edit_file: Edit files using search & replace
+- run_command: Execute shell commands
+- list_files: List directory contents
+- search_files: Search for patterns in files
+
+Guidelines:
+1. Analyze the task carefully before making changes
+2. Read relevant files to understand the codebase
+3. Make focused, minimal changes
+4. Test your changes with appropriate commands
+5. Commit your changes with a descriptive message when done
+6. Provide a summary of what you accomplished
+
+IMPORTANT: After completing code changes, run "git add" and "git commit" to commit your work.`;
+
+    // Run the agentic loop
+    try {
+        const result = await runAgenticLoop({
+            systemPrompt,
+            userMessage: prompt,
+            projectPath,
+            abortSignal: abortController.signal,
+
+            onTextChunk: (text) => {
+                job.output += text;
+                addMessage(conversationId, text, 'log');
+            },
+
+            onToolUse: (toolName, input) => {
+                const toolMsg = `\n🔧 Using tool: ${toolName}\n`;
+                job.output += toolMsg;
+                addMessage(conversationId, toolMsg, 'log');
+                console.log(`[agent-jobs:anthropic-api] Tool use: ${toolName}`, JSON.stringify(input).substring(0, 200));
+            },
+
+            onToolResult: (toolName, result) => {
+                const preview = result.output.substring(0, 500);
+                const resultMsg = result.success
+                    ? `✓ ${toolName}: ${preview}${result.output.length > 500 ? '...' : ''}\n`
+                    : `✗ ${toolName} failed: ${result.error}\n`;
+                job.output += resultMsg;
+                addMessage(conversationId, resultMsg, result.success ? 'log' : 'error');
+            },
+
+            onIterationStart: (iteration) => {
+                console.log(`[agent-jobs:anthropic-api] Iteration ${iteration}`);
+            },
+
+            onError: (error) => {
+                console.error(`[agent-jobs:anthropic-api] Error:`, error);
+            },
+        });
+
+        // Extract commit hash from output
+        const commitMatch = job.output.match(/commit\s+([a-f0-9]{7,40})/i);
+        const commitHash = commitMatch ? commitMatch[1] : undefined;
+
+        // Determine success
+        const success = result.success;
+        job.status = success ? 'completed' : 'failed';
+
+        console.log(`[agent-jobs:anthropic-api] Task ${job.status}: iterations=${result.totalIterations}, tools=${result.toolsUsed.length}`);
+        logDebugState(`anthropic-api-${job.status}`);
+
+        // Complete the conversation
+        completeConversation(conversationId, {
+            status: job.status,
+            git_commit_hash: commitHash,
+        });
+
+        const completionMsg = success
+            ? `\n✅ Task completed successfully${commitHash ? ` (commit: ${commitHash})` : ''}\nIterations: ${result.totalIterations}, Tools used: ${result.toolsUsed.length}`
+            : `\n❌ Task failed: ${result.error || 'Unknown error'}`;
+        job.output += completionMsg;
+        addMessage(conversationId, completionMsg, success ? 'success' : 'error');
+
+        // Append to work log
+        appendToWorkLog(projectPath, {
+            agentName,
+            agentAvatar: agentAvatar || '🤖',
+            ticketTitle: ticketTitle || 'Unknown Task',
+            success,
+            commitHash,
+            output: job.output,
+        });
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`[agent-jobs:anthropic-api] Exception:`, error);
+
+        job.status = 'failed';
+        job.output += `\n❌ Error: ${errorMessage}`;
+
+        completeConversation(conversationId, { status: 'failed' });
+        addMessage(conversationId, `❌ Error: ${errorMessage}`, 'error');
+
+        appendToWorkLog(projectPath, {
+            agentName,
+            agentAvatar: agentAvatar || '🤖',
+            ticketTitle: ticketTitle || 'Unknown Task',
+            success: false,
+            output: job.output,
+        });
+    }
+
+    // Remove from running jobs after a delay
+    setTimeout(() => {
+        runningJobs.delete(jobId);
+    }, 60000);
 }

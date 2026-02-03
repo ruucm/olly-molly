@@ -172,7 +172,7 @@ export function TicketSidebar({
     useEffect(() => {
         if (typeof window === 'undefined') return;
         const savedProvider = window.localStorage.getItem('agentProvider') as AgentProvider | null;
-        if (savedProvider === 'claude' || savedProvider === 'opencode' || savedProvider === 'codex') {
+        if (savedProvider === 'claude' || savedProvider === 'opencode' || savedProvider === 'codex' || savedProvider === 'anthropic-api') {
             setProvider(savedProvider);
         }
         setProviderLoaded(true);
@@ -693,7 +693,7 @@ export function TicketSidebar({
                         <div className="p-3 border-b border-primary space-y-2 flex-shrink-0 bg-tertiary/30">
                             <div className="flex items-center gap-2">
                                 <label className="text-xs text-tertiary">Provider:</label>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 flex-wrap">
                                     <button
                                         onClick={() => setProvider('claude')}
                                         disabled={executing}
@@ -703,6 +703,16 @@ export function TicketSidebar({
                                             } ${executing ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
                                         🟠 Claude
+                                    </button>
+                                    <button
+                                        onClick={() => setProvider('anthropic-api')}
+                                        disabled={executing}
+                                        className={`px-2 py-1 rounded text-xs font-medium transition-all ${provider === 'anthropic-api'
+                                            ? 'bg-purple-500 text-white'
+                                            : 'bg-tertiary text-tertiary hover:text-primary'
+                                            } ${executing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        🟣 API Direct
                                     </button>
                                     <button
                                         onClick={() => setProvider('codex')}

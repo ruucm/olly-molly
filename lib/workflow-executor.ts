@@ -53,7 +53,7 @@ export function initializeExecutionState(workflowId: string): WorkflowExecutionS
 export interface ExecuteWorkflowOptions {
   projectId: string;
   defaultAgentId: string;
-  provider: 'claude' | 'opencode' | 'codex';
+  provider: 'claude' | 'opencode' | 'codex' | 'anthropic-api';
   onNodeStart?: (nodeId: string) => void;
   onNodeComplete?: (nodeId: string, success: boolean) => void;
   onWorkflowComplete?: (success: boolean) => void;

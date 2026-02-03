@@ -28,7 +28,7 @@ export interface ServerConversation {
     id: string;
     ticket_id: string;
     agent_id: string;
-    provider: 'claude' | 'opencode' | 'codex';
+    provider: 'claude' | 'opencode' | 'codex' | 'anthropic-api';
     prompt: string | null;
     feedback: string | null;
     status: 'running' | 'completed' | 'failed' | 'cancelled';
@@ -91,7 +91,7 @@ export function createConversation(data: {
     id?: string;
     ticket_id: string;
     agent_id: string;
-    provider: 'claude' | 'opencode' | 'codex';
+    provider: 'claude' | 'opencode' | 'codex' | 'anthropic-api';
     prompt?: string;
     feedback?: string;
 }): ServerConversation {
