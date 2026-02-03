@@ -112,6 +112,16 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'development',
       tags: ['react', 'spa', 'tailwind', 'javascript', 'frontend', 'jsx'],
     },
+    AUTH_BACKEND: {
+      description: 'Express 기반 로그인/회원가입 API를 파일별 엔드포인트로 구축하는 인증 시스템 전문가입니다.',
+      category: 'development',
+      tags: ['express', 'authentication', 'login', 'register', 'jwt', 'bcrypt', 'sqlite', 'postgresql'],
+    },
+    TOSSPAYMENTS: {
+      description: '토스페이먼츠 결제위젯 연동을 전문적으로 도와주는 결제 시스템 전문가입니다.',
+      category: 'development',
+      tags: ['tosspayments', 'payment', 'checkout', 'widget', 'fintech', 'e-commerce'],
+    },
   };
 
   return metadata[role] || {
