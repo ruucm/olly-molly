@@ -591,7 +591,9 @@ export function TicketSidebar({
                         label="Description"
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
-                        rows={2}
+                        autoResize
+                        minRows={2}
+                        maxRows={8}
                         className="text-sm"
                     />
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">

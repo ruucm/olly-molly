@@ -336,7 +336,9 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Enter ticket description"
-                    rows={4}
+                    autoResize
+                    minRows={3}
+                    maxRows={12}
                 />
 
                 <div className="grid grid-cols-2 gap-4">
