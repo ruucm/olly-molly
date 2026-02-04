@@ -652,6 +652,8 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 `.trim();
 
 async function persistSqliteDump() {
+  const startTime = Date.now();
+  dbDebug('sqliteDump', 'Starting persistSqliteDump...');
   try {
     const db = await getIdb();
     const members = Array.from(membersCollection.values()) as unknown as Member[];
@@ -661,6 +663,8 @@ async function persistSqliteDump() {
     const agentWorkLogs = Array.from(agentWorkLogsCollection.values()) as unknown as AgentWorkLog[];
     const conversations = Array.from(conversationsCollection.values()) as unknown as Conversation[];
     const conversationMessages = Array.from(conversationMessagesCollection.values()) as unknown as ConversationMessage[];
+
+    dbDebug('sqliteDump', `Data counts: members=${members.length}, tickets=${tickets.length}, logs=${activityLogs.length}, convMsgs=${conversationMessages.length}`);
 
     const chunks: string[] = ['BEGIN;', SQLITE_SCHEMA];
 
@@ -766,13 +770,20 @@ async function persistSqliteDump() {
 
     chunks.push('COMMIT;');
 
+    const sqlSize = chunks.join('\n').length;
+    dbDebug('sqliteDump', `SQL size: ${(sqlSize / 1024).toFixed(1)}KB, writing to IndexedDB...`);
+
     await db.put(STORE_NAMES.sqliteDump, {
       id: 'main',
       sql: chunks.join('\n'),
       updated_at: new Date().toISOString(),
     });
+
+    const elapsed = Date.now() - startTime;
+    dbDebug('sqliteDump', `✓ Completed in ${elapsed}ms`);
   } catch (error) {
-    console.error('[db] Failed to persist sqlite dump', error);
+    const elapsed = Date.now() - startTime;
+    dbDebug('sqliteDump', `❌ Failed after ${elapsed}ms:`, error);
   }
 }
 
