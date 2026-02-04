@@ -889,64 +889,102 @@ let initPromise: Promise<void> | null = null;
 
 /**
  * Load all data from SERVER into collections (no IndexedDB!)
- * Server backup is the source of truth.
+ * Server JSON files are the source of truth.
  */
 async function loadAllCollectionsFromServer(): Promise<void> {
   dbDebug('bgload', 'Starting data load from server...');
   const startTime = Date.now();
 
   try {
-    // Get email from localStorage
-    const email = localStorage.getItem(USER_EMAIL_STORAGE_KEY);
-    if (!email) {
-      dbDebug('bgload', 'No email found, skipping server load (new user)');
+    // Fetch all data from server
+    const res = await fetch('/api/data/sync');
+    if (!res.ok) {
+      throw new Error(`Server returned ${res.status}`);
+    }
+
+    const { data } = await res.json();
+    if (!data) {
+      dbDebug('bgload', 'No data from server');
       return;
     }
 
-    // Fetch backup from server
-    const res = await fetch(`/api/db/restore?email=${encodeURIComponent(email)}`);
-    const data = await res.json();
-
-    if (!data.exists || !data.backup?.stores) {
-      dbDebug('bgload', 'No backup found on server');
-      return;
-    }
-
-    const stores = data.backup.stores;
-
-    // Load each collection from backup
+    // Load each collection from server response
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const loadCollection = (storeName: string, collection: any) => {
-      const rows = stores[storeName] as Array<{ id: string }> | undefined;
-      if (rows && rows.length > 0) {
+    const loadCollection = (storeName: string, collection: any, serverData: any[]) => {
+      if (serverData && serverData.length > 0) {
         const existingIds = new Set(Array.from(collection.keys()));
-        const newRows = rows.filter((row) => !existingIds.has(row.id));
+        const newRows = serverData.filter((row) => !existingIds.has(row.id));
         if (newRows.length > 0) {
           collection.insert(newRows);
         }
-        dbDebug('bgload', `[${storeName}] Loaded ${rows.length} rows (${newRows.length} new)`);
+        dbDebug('bgload', `[${storeName}] Loaded ${serverData.length} rows (${newRows.length} new)`);
       }
     };
 
     // Load all collections
-    loadCollection(STORE_NAMES.members, membersCollection);
-    loadCollection(STORE_NAMES.marketAgents, marketAgentsCollection);
-    loadCollection(STORE_NAMES.tickets, ticketsCollection);
-    loadCollection(STORE_NAMES.activityLogs, activityLogsCollection);
-    loadCollection(STORE_NAMES.projects, projectsCollection);
-    loadCollection(STORE_NAMES.agentWorkLogs, agentWorkLogsCollection);
-    // conversations - MEMORY ONLY (server-store.ts is source of truth)
-    // conversationMessages - MEMORY ONLY (server-store.ts is source of truth)
-    loadCollection(STORE_NAMES.workflows, workflowsCollection);
-    loadCollection(STORE_NAMES.workflowNodes, workflowNodesCollection);
-    loadCollection(STORE_NAMES.workflowEdges, workflowEdgesCollection);
-    loadCollection(STORE_NAMES.pmRequests, pmRequestsCollection);
+    loadCollection(STORE_NAMES.members, membersCollection, data.members || []);
+    loadCollection(STORE_NAMES.marketAgents, marketAgentsCollection, data.market_agents || []);
+    loadCollection(STORE_NAMES.tickets, ticketsCollection, data.tickets || []);
+    loadCollection(STORE_NAMES.activityLogs, activityLogsCollection, data.activity_logs || []);
+    loadCollection(STORE_NAMES.projects, projectsCollection, data.projects || []);
+    // agentWorkLogs - execution data from server-store.ts
+    // conversations - execution data from server-store.ts
+    // conversationMessages - execution data from server-store.ts
+    loadCollection(STORE_NAMES.workflows, workflowsCollection, data.workflows || []);
+    loadCollection(STORE_NAMES.workflowNodes, workflowNodesCollection, data.workflow_nodes || []);
+    loadCollection(STORE_NAMES.workflowEdges, workflowEdgesCollection, data.workflow_edges || []);
+    loadCollection(STORE_NAMES.pmRequests, pmRequestsCollection, data.pm_requests || []);
 
     const elapsed = Date.now() - startTime;
     dbDebug('bgload', `✓ Server load complete (${elapsed}ms)`);
   } catch (error) {
     dbDebug('bgload', '❌ Server load failed:', error);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SERVER SYNC HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+// All mutations are synced to server for multi-tab consistency.
+// Local state is updated first (optimistic), then server is notified.
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function syncToServer(
+  action: 'create' | 'update' | 'delete' | 'bulkCreate' | 'bulkUpdate',
+  collection: string,
+  payload: { data?: unknown; id?: string; updates?: unknown }
+): Promise<void> {
+  try {
+    const res = await fetch('/api/data/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, collection, ...payload }),
+    });
+    if (!res.ok) {
+      console.error(`[sync] Failed to sync ${action} to ${collection}:`, await res.text());
+    } else {
+      dbDebug('sync', `${action} ${collection} synced to server`);
+    }
+  } catch (error) {
+    console.error(`[sync] Error syncing ${action} to ${collection}:`, error);
+  }
+}
+
+// Fire-and-forget sync (don't block UI)
+function syncCreate(collection: string, data: unknown): void {
+  void syncToServer('create', collection, { data });
+}
+
+function syncUpdate(collection: string, id: string, updates: unknown): void {
+  void syncToServer('update', collection, { id, updates });
+}
+
+function syncDelete(collection: string, id: string): void {
+  void syncToServer('delete', collection, { id });
+}
+
+function syncBulkUpdate(collection: string, updates: Array<{ id: string; data: unknown }>): void {
+  void syncToServer('bulkUpdate', collection, { updates });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1163,31 +1201,38 @@ export const memberService = {
     return Array.from(membersCollection.values()).find((member) => member.role === role);
   },
   updateSystemPrompt(id: string, systemPrompt: string): Member | undefined {
+    const updated_at = new Date().toISOString();
     membersCollection.update(id, (draft) => {
       draft.system_prompt = systemPrompt;
-      draft.updated_at = new Date().toISOString();
+      draft.updated_at = updated_at;
     });
-    return this.getById(id);
+    const member = this.getById(id);
+    if (member) syncUpdate(STORE_NAMES.members, id, { system_prompt: systemPrompt, updated_at });
+    return member;
   },
   update(id: string, data: Partial<Pick<Member, 'name' | 'avatar' | 'profile_image' | 'system_prompt' | 'can_generate_images' | 'can_log_screenshots'>>): Member | undefined {
+    const updated_at = new Date().toISOString();
+    const updates: Record<string, unknown> = { updated_at };
     membersCollection.update(id, (draft) => {
-      if (data.name !== undefined) draft.name = data.name;
-      if (data.avatar !== undefined) draft.avatar = data.avatar;
-      if (data.profile_image !== undefined) draft.profile_image = data.profile_image;
-      if (data.system_prompt !== undefined) draft.system_prompt = data.system_prompt;
+      if (data.name !== undefined) { draft.name = data.name; updates.name = data.name; }
+      if (data.avatar !== undefined) { draft.avatar = data.avatar; updates.avatar = data.avatar; }
+      if (data.profile_image !== undefined) { draft.profile_image = data.profile_image; updates.profile_image = data.profile_image; }
+      if (data.system_prompt !== undefined) { draft.system_prompt = data.system_prompt; updates.system_prompt = data.system_prompt; }
       if (data.can_generate_images !== undefined) {
         draft.can_generate_images = data.can_generate_images ? 1 : 0;
+        updates.can_generate_images = draft.can_generate_images;
       }
       if (data.can_log_screenshots !== undefined) {
         draft.can_log_screenshots = data.can_log_screenshots ? 1 : 0;
+        updates.can_log_screenshots = draft.can_log_screenshots;
       }
-      draft.updated_at = new Date().toISOString();
+      draft.updated_at = updated_at;
     });
+    syncUpdate(STORE_NAMES.members, id, updates);
     return this.getById(id);
   },
   create(data: { role: string; name: string; avatar?: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean }): Member {
     const now = new Date().toISOString();
-    // Get max order_index to place new member at the end
     const members = Array.from(membersCollection.values());
     const maxOrderIndex = members.reduce((max, m) => Math.max(max, m.order_index ?? 0), 0);
     const member: Member = {
@@ -1206,15 +1251,18 @@ export const memberService = {
       updated_at: now,
     };
     membersCollection.insert(member);
+    syncCreate(STORE_NAMES.members, member);
     return member;
   },
-  reorder(members: { id: string; order_index: number }[]) {
-    members.forEach((m) => {
+  reorder(updates: { id: string; order_index: number }[]) {
+    const now = new Date().toISOString();
+    updates.forEach((m) => {
       membersCollection.update(m.id, (draft) => {
         draft.order_index = m.order_index;
-        draft.updated_at = new Date().toISOString();
+        draft.updated_at = now;
       });
     });
+    syncBulkUpdate(STORE_NAMES.members, updates.map(u => ({ id: u.id, data: { order_index: u.order_index, updated_at: now } })));
   },
   delete(id: string): { success: boolean; error?: string } {
     const member = this.getById(id);
@@ -1222,6 +1270,7 @@ export const memberService = {
       return { success: false, error: 'Member not found' };
     }
     membersCollection.delete(id);
+    syncDelete(STORE_NAMES.members, id);
     return { success: true };
   },
   addFromMarket(marketAgentId: string): Member {
@@ -1230,7 +1279,6 @@ export const memberService = {
       throw new Error('Market agent not found');
     }
     const now = new Date().toISOString();
-    // Get max order_index to place new member at the end
     const members = Array.from(membersCollection.values());
     const maxOrderIndex = members.reduce((max, m) => Math.max(max, m.order_index ?? 0), 0);
     const member: Member = {
@@ -1249,6 +1297,7 @@ export const memberService = {
       updated_at: now,
     };
     membersCollection.insert(member);
+    syncCreate(STORE_NAMES.members, member);
     return member;
   },
 };
@@ -1372,12 +1421,14 @@ export const ticketService = {
     return ticketsCollection.get(id);
   },
   reorder(tickets: { id: string; order_index: number }[]) {
+    const now = new Date().toISOString();
     tickets.forEach((t) => {
       ticketsCollection.update(t.id, (draft) => {
         draft.order_index = t.order_index;
-        draft.updated_at = new Date().toISOString();
+        draft.updated_at = now;
       });
     });
+    syncBulkUpdate(STORE_NAMES.tickets, tickets.map(t => ({ id: t.id, data: { order_index: t.order_index, updated_at: now } })));
   },
   create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_ids?: string[]; project_id?: string; created_by?: string; order_index?: number; enable_screenshot?: number }): Ticket {
     const now = new Date().toISOString();
@@ -1391,11 +1442,12 @@ export const ticketService = {
       project_id: data.project_id || null,
       created_by: data.created_by || null,
       order_index: data.order_index ?? Date.now(),
-      enable_screenshot: data.enable_screenshot ?? 0,  // 기본값: 비활성화
+      enable_screenshot: data.enable_screenshot ?? 0,
       created_at: now,
       updated_at: now,
     };
     ticketsCollection.insert(ticket);
+    syncCreate(STORE_NAMES.tickets, ticket);
     activityService.log({
       ticket_id: ticket.id,
       member_id: data.created_by || null,
@@ -1409,15 +1461,20 @@ export const ticketService = {
     const current = this.getById(id);
     if (!current) return undefined;
 
+    const updated_at = new Date().toISOString();
+    const updates: Record<string, unknown> = { updated_at };
+
     ticketsCollection.update(id, (draft) => {
-      if (data.title !== undefined) draft.title = data.title;
-      if (data.description !== undefined) draft.description = data.description;
-      if (data.status !== undefined) draft.status = data.status;
-      if (data.priority !== undefined) draft.priority = data.priority;
-      if (data.assignee_ids !== undefined) draft.assignee_ids = data.assignee_ids;
-      if (data.enable_screenshot !== undefined) draft.enable_screenshot = data.enable_screenshot;
-      draft.updated_at = new Date().toISOString();
+      if (data.title !== undefined) { draft.title = data.title; updates.title = data.title; }
+      if (data.description !== undefined) { draft.description = data.description; updates.description = data.description; }
+      if (data.status !== undefined) { draft.status = data.status; updates.status = data.status; }
+      if (data.priority !== undefined) { draft.priority = data.priority; updates.priority = data.priority; }
+      if (data.assignee_ids !== undefined) { draft.assignee_ids = data.assignee_ids; updates.assignee_ids = data.assignee_ids; }
+      if (data.enable_screenshot !== undefined) { draft.enable_screenshot = data.enable_screenshot; updates.enable_screenshot = data.enable_screenshot; }
+      draft.updated_at = updated_at;
     });
+
+    syncUpdate(STORE_NAMES.tickets, id, updates);
 
     if (data.status !== undefined && data.status !== current.status) {
       activityService.log({
@@ -1460,6 +1517,7 @@ export const ticketService = {
   },
   delete(id: string): boolean {
     ticketsCollection.delete(id);
+    syncDelete(STORE_NAMES.tickets, id);
     return true;
   },
 };
@@ -1489,22 +1547,30 @@ export const projectService = {
       updated_at: now,
     };
     projectsCollection.insert(project);
+    syncCreate(STORE_NAMES.projects, project);
     return project;
   },
   setActive(id: string): Project | undefined {
-    const ids = Array.from(projectsCollection.keys());
+    const now = new Date().toISOString();
+    const ids = Array.from(projectsCollection.keys()) as string[];
     if (ids.length > 0) {
       projectsCollection.update(ids, (drafts) => {
         drafts.forEach((draft) => {
           draft.is_active = draft.id === id ? 1 : 0;
-          draft.updated_at = new Date().toISOString();
+          draft.updated_at = now;
         });
       });
+      // Sync all project active states
+      syncBulkUpdate(STORE_NAMES.projects, ids.map(pid => ({
+        id: pid,
+        data: { is_active: pid === id ? 1 : 0, updated_at: now }
+      })));
     }
     return this.getById(id);
   },
   delete(id: string): boolean {
     projectsCollection.delete(id);
+    syncDelete(STORE_NAMES.projects, id);
     return true;
   },
 };
@@ -1710,25 +1776,36 @@ export const workflowService = {
       updated_at: now,
     };
     workflowsCollection.insert(workflow);
+    syncCreate(STORE_NAMES.workflows, workflow);
     return workflow;
   },
   update(id: string, data: Partial<Pick<Workflow, 'name' | 'description' | 'status' | 'current_node_id'>>): Workflow | undefined {
+    const updated_at = new Date().toISOString();
+    const updates: Record<string, unknown> = { updated_at };
     workflowsCollection.update(id, (draft) => {
-      if (data.name !== undefined) draft.name = data.name;
-      if (data.description !== undefined) draft.description = data.description;
-      if (data.status !== undefined) draft.status = data.status;
-      if (data.current_node_id !== undefined) draft.current_node_id = data.current_node_id;
-      draft.updated_at = new Date().toISOString();
+      if (data.name !== undefined) { draft.name = data.name; updates.name = data.name; }
+      if (data.description !== undefined) { draft.description = data.description; updates.description = data.description; }
+      if (data.status !== undefined) { draft.status = data.status; updates.status = data.status; }
+      if (data.current_node_id !== undefined) { draft.current_node_id = data.current_node_id; updates.current_node_id = data.current_node_id; }
+      draft.updated_at = updated_at;
     });
+    syncUpdate(STORE_NAMES.workflows, id, updates);
     return this.getById(id);
   },
   delete(id: string): boolean {
     // Delete all nodes and edges first
     const nodes = Array.from(workflowNodesCollection.values()).filter((n) => n.workflow_id === id);
     const edges = Array.from(workflowEdgesCollection.values()).filter((e) => e.workflow_id === id);
-    nodes.forEach((node) => workflowNodesCollection.delete(node.id));
-    edges.forEach((edge) => workflowEdgesCollection.delete(edge.id));
+    nodes.forEach((node) => {
+      workflowNodesCollection.delete(node.id);
+      syncDelete(STORE_NAMES.workflowNodes, node.id);
+    });
+    edges.forEach((edge) => {
+      workflowEdgesCollection.delete(edge.id);
+      syncDelete(STORE_NAMES.workflowEdges, edge.id);
+    });
     workflowsCollection.delete(id);
+    syncDelete(STORE_NAMES.workflows, id);
     return true;
   },
 };
@@ -1750,6 +1827,7 @@ export const workflowNodeService = {
       created_at: new Date().toISOString(),
     };
     workflowNodesCollection.insert(node);
+    syncCreate(STORE_NAMES.workflowNodes, node);
     return node;
   },
   updatePosition(id: string, position_x: number, position_y: number): void {
@@ -1757,14 +1835,19 @@ export const workflowNodeService = {
       draft.position_x = position_x;
       draft.position_y = position_y;
     });
+    syncUpdate(STORE_NAMES.workflowNodes, id, { position_x, position_y });
   },
   delete(id: string): boolean {
     // Delete related edges
     const edges = Array.from(workflowEdgesCollection.values()).filter(
       (e) => e.source_node_id === id || e.target_node_id === id
     );
-    edges.forEach((edge) => workflowEdgesCollection.delete(edge.id));
+    edges.forEach((edge) => {
+      workflowEdgesCollection.delete(edge.id);
+      syncDelete(STORE_NAMES.workflowEdges, edge.id);
+    });
     workflowNodesCollection.delete(id);
+    syncDelete(STORE_NAMES.workflowNodes, id);
     return true;
   },
 };
@@ -1785,10 +1868,12 @@ export const workflowEdgeService = {
       created_at: new Date().toISOString(),
     };
     workflowEdgesCollection.insert(edge);
+    syncCreate(STORE_NAMES.workflowEdges, edge);
     return edge;
   },
   delete(id: string): boolean {
     workflowEdgesCollection.delete(id);
+    syncDelete(STORE_NAMES.workflowEdges, id);
     return true;
   },
 };
