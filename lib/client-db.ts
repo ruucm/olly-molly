@@ -558,18 +558,20 @@ export function initClientDb(): Promise<void> {
       }
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 4: Mark as initialized
+      // STEP 4: Load data from server (BLOCKING - must complete before UI)
+      // ─────────────────────────────────────────────────────────────────────
+      dbDebug('init:4', 'Loading data from server...');
+      await loadAllCollectionsFromServer();
+      dbDebug('init:4', '✓ Server data loaded');
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 5: Mark as initialized
       // ─────────────────────────────────────────────────────────────────────
       isDbInitialized = true;
-      dbDebug('init:4', '✅ DB marked as initialized');
+      dbDebug('init:5', '✅ DB marked as initialized');
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 5: Load data from server (non-blocking)
-      // ─────────────────────────────────────────────────────────────────────
-      void loadAllCollectionsFromServer();
-
-      // ─────────────────────────────────────────────────────────────────────
-      // STEP 6: Start auto backup
+      // STEP 6: Start auto backup (non-blocking)
       // ─────────────────────────────────────────────────────────────────────
       startAutoBackup();
 
