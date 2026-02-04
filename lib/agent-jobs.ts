@@ -47,6 +47,15 @@ const CLAUDE_STREAM_ARGS = [
     '--include-partial-messages',
     '--verbose',
 ];
+const OPENCODE_STREAM_ARGS = [
+    'run',
+    '--format', 'json',
+];
+const CODEX_STREAM_ARGS = [
+    'exec',
+    '--json',
+    '--dangerously-bypass-approvals-and-sandbox',
+];
 const STREAM_FLUSH_INTERVAL_MS = 1000;
 const STREAM_FLUSH_CHARS = 200;
 const CLAUDE_MODEL_ENV_KEYS = ['CLAUDE_MODEL', 'CLAUDE_CODE_MODEL', 'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_MODEL'];
@@ -116,24 +125,29 @@ function getConfiguredModel(provider: AgentProvider): string | null {
     return null;
 }
 
-function getCodexInvocation(prompt: string): { args: string[]; useStdin: boolean } {
+function getCodexInvocation(): { args: string[]; useStdin: boolean } {
     const rawArgs = process.env[CODEX_ARGS_ENV_KEY];
     if (!rawArgs) {
-        return { args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'], useStdin: true };
+        // Default: use stream args with stdin
+        return { args: [...CODEX_STREAM_ARGS, '-'], useStdin: true };
     }
     const parsed = rawArgs.split(' ').map(arg => arg.trim()).filter(Boolean);
     if (parsed.length === 0) {
-        return { args: ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'], useStdin: true };
+        return { args: [...CODEX_STREAM_ARGS, '-'], useStdin: true };
     }
+    // Ensure --json is included for streaming
+    const hasJson = parsed.includes('--json');
     const hasExec = parsed.includes('exec');
-    const baseArgs = hasExec ? parsed : ['exec', ...parsed];
-    if (baseArgs.includes('{prompt}')) {
-        return { args: baseArgs.map(arg => (arg === '{prompt}' ? prompt : arg)), useStdin: false };
+    let baseArgs = hasExec ? parsed : ['exec', ...parsed];
+    if (!hasJson) {
+        // Insert --json after exec
+        const execIndex = baseArgs.indexOf('exec');
+        baseArgs = [...baseArgs.slice(0, execIndex + 1), '--json', ...baseArgs.slice(execIndex + 1)];
     }
     if (baseArgs.includes('-')) {
         return { args: baseArgs, useStdin: true };
     }
-    return { args: [...baseArgs, prompt], useStdin: false };
+    return { args: [...baseArgs, '-'], useStdin: true };
 }
 
 interface RunningJob {
@@ -505,25 +519,26 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
     let args: string[];
     let startMessage: string;
     let useStdin = true;
-    const isClaudeStream = provider === 'claude';
+    // All providers now use JSON streaming
+    const isJsonStream = true;
 
     const modelLabel = getConfiguredModel(provider) ?? 'default';
 
     if (provider === 'opencode') {
         execPath = OPENCODE_CMD;
-        // Use stdin for prompt to avoid shell escaping issues
-        args = ['run', '-'];
+        // Use JSON format for streaming, stdin for prompt
+        args = [...OPENCODE_STREAM_ARGS, '-'];
         startMessage = `🚀 Starting OpenCode in ${projectPath}...\nModel: ${modelLabel}\n\n`;
     } else if (provider === 'codex') {
         execPath = CODEX_CMD;
-        // Use stdin for prompt to avoid shell escaping issues
-        const codex = getCodexInvocation(prompt);
+        // Use JSON format for streaming, stdin for prompt
+        const codex = getCodexInvocation();
         args = codex.args;
         useStdin = codex.useStdin;
         startMessage = `🚀 Starting Codex CLI in ${projectPath}...\nModel: ${modelLabel}\n\n`;
     } else {
         execPath = CLAUDE_CMD;
-        // Use stdin for prompt to avoid shell escaping issues
+        // Use stream-json format, stdin for prompt
         args = CLAUDE_STREAM_ARGS;
         startMessage = `🚀 Starting Claude Code in ${projectPath}...\nModel: ${modelLabel}\n\n`;
     }
@@ -556,7 +571,8 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
 
     // For OpenCode, set permission to allow all to skip interactive prompts
     if (provider === 'opencode') {
-        spawnEnv.OPENCODE_PERMISSION = '"allow"';
+        spawnEnv.OPENCODE_PERMISSION = 'allow';
+        spawnEnv.OPENCODE_AUTO_APPROVE = 'true';
     }
 
     // Debug: Log spawn details
@@ -621,8 +637,8 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
     let streamedTextBuffer = '';
     let lastFlushTime = Date.now();
     let hasStreamedText = false;
-    let claudeResultReceived = false; // Track if we received a result from Claude
-    let claudeResultIsError = false; // Track is_error field from Claude result
+    let resultReceived = false; // Track if we received a result
+    let resultIsError = false; // Track if result indicates error
 
     const flushStreamedText = (force = false) => {
         if (!streamedTextBuffer) return;
@@ -638,49 +654,143 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         addMessage(conversationId, chunk, 'log');
     };
 
-    const handleClaudeStreamLine = (line: string) => {
+    // Extract text content from JSON based on provider
+    const extractTextFromJson = (parsed: Record<string, unknown>): string | null => {
+        // Claude Code format
+        if (parsed?.type === 'stream_event' &&
+            (parsed.event as Record<string, unknown>)?.type === 'content_block_delta' &&
+            ((parsed.event as Record<string, unknown>)?.delta as Record<string, unknown>)?.type === 'text_delta') {
+            return ((parsed.event as Record<string, unknown>)?.delta as Record<string, unknown>)?.text as string;
+        }
+
+        // OpenCode JSON format - content events
+        if (parsed?.type === 'text' && typeof parsed.text === 'string') {
+            return parsed.text;
+        }
+        if (parsed?.type === 'content' && typeof parsed.content === 'string') {
+            return parsed.content;
+        }
+        // OpenCode message format
+        if (parsed?.type === 'message' && typeof parsed.content === 'string') {
+            return parsed.content;
+        }
+        // OpenCode assistant response
+        if (parsed?.role === 'assistant' && typeof parsed.content === 'string') {
+            return parsed.content;
+        }
+
+        // Codex JSONL format - text events
+        if (parsed?.type === 'message' && parsed?.role === 'assistant') {
+            const content = parsed.content;
+            if (typeof content === 'string') {
+                return content;
+            }
+            if (Array.isArray(content)) {
+                return content
+                    .filter((c: Record<string, unknown>) => c.type === 'text' || c.type === 'output_text')
+                    .map((c: Record<string, unknown>) => c.text || c.content)
+                    .join('');
+            }
+        }
+        // Codex delta/chunk events
+        if (parsed?.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
+            return parsed.delta;
+        }
+        if (parsed?.type === 'content_block_delta' && typeof (parsed.delta as Record<string, unknown>)?.text === 'string') {
+            return (parsed.delta as Record<string, unknown>).text as string;
+        }
+        // Codex tool output
+        if (parsed?.type === 'tool_output' && typeof parsed.output === 'string') {
+            return `[tool] ${parsed.output}\n`;
+        }
+
+        return null;
+    };
+
+    // Check if JSON indicates completion/result
+    const checkForResult = (parsed: Record<string, unknown>): { isResult: boolean; isError: boolean; text?: string } => {
+        // Claude Code result
+        if (parsed?.type === 'result') {
+            return {
+                isResult: true,
+                isError: parsed.is_error === true,
+                text: typeof parsed.result === 'string' ? parsed.result : undefined,
+            };
+        }
+
+        // OpenCode completion
+        if (parsed?.type === 'done' || parsed?.type === 'complete' || parsed?.type === 'end') {
+            return { isResult: true, isError: parsed.error === true || parsed.success === false };
+        }
+        if (parsed?.event === 'done' || parsed?.event === 'complete') {
+            return { isResult: true, isError: parsed.error === true };
+        }
+
+        // Codex completion
+        if (parsed?.type === 'response.completed' || parsed?.type === 'response.done') {
+            return { isResult: true, isError: false };
+        }
+        if (parsed?.type === 'error') {
+            return { isResult: true, isError: true, text: parsed.message as string || 'Unknown error' };
+        }
+
+        return { isResult: false, isError: false };
+    };
+
+    const handleJsonStreamLine = (line: string) => {
         const trimmed = line.trim();
         if (!trimmed) return;
         try {
             const parsed = JSON.parse(trimmed);
-            if (parsed?.type === 'stream_event' &&
-                parsed.event?.type === 'content_block_delta' &&
-                parsed.event?.delta?.type === 'text_delta') {
-                streamedTextBuffer += parsed.event.delta.text;
+
+            // Check for completion/result
+            const resultCheck = checkForResult(parsed);
+            if (resultCheck.isResult) {
+                resultReceived = true;
+                resultIsError = resultCheck.isError;
+                if (resultCheck.text && !hasStreamedText) {
+                    streamedTextBuffer += resultCheck.text;
+                    hasStreamedText = true;
+                    flushStreamedText(true);
+                }
+                return;
+            }
+
+            // Extract text content
+            const text = extractTextFromJson(parsed);
+            if (text) {
+                streamedTextBuffer += text;
                 hasStreamedText = true;
                 flushStreamedText();
                 return;
             }
 
-            if (parsed?.type === 'result') {
-                claudeResultReceived = true; // Claude finished and sent result
-                claudeResultIsError = parsed.is_error === true; // Track if Claude reported an error
-                if (typeof parsed.result === 'string' && !hasStreamedText) {
-                    streamedTextBuffer += parsed.result;
-                    hasStreamedText = true;
-                    flushStreamedText(true);
-                }
+            // Log unhandled JSON for debugging (only in dev)
+            if (process.env.DEBUG_AGENT_STREAM === 'true') {
+                console.log(`[agent-jobs:stream] Unhandled JSON: ${trimmed.substring(0, 200)}`);
             }
         } catch {
+            // Not JSON, treat as plain text
             streamedTextBuffer += `${line}\n`;
             flushStreamedText();
         }
     };
 
-    // Capture stdout
+    // Capture stdout - all providers use JSON streaming now
     agentProcess.stdout?.on('data', (data: Buffer) => {
         const text = data.toString('utf-8');
-        if (isClaudeStream) {
+        if (isJsonStream) {
             stdoutBuffer += text;
             const lines = stdoutBuffer.split('\n');
             stdoutBuffer = lines.pop() || '';
             for (const line of lines) {
-                handleClaudeStreamLine(line);
+                handleJsonStreamLine(line);
             }
             flushStreamedText();
             return;
         }
 
+        // Fallback for non-JSON mode (not used currently)
         job.output += text;
         addMessage(conversationId, text, 'log');
     });
@@ -694,16 +804,16 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
     });
 
     agentProcess.on('close', (code: number | null) => {
-        if (isClaudeStream) {
+        if (isJsonStream) {
             if (stdoutBuffer.trim()) {
-                handleClaudeStreamLine(stdoutBuffer);
+                handleJsonStreamLine(stdoutBuffer);
                 stdoutBuffer = '';
             }
             flushStreamedText(true);
         }
 
         // Log exit code for debugging
-        console.log(`[agent-jobs] Process exited with code: ${code}, provider: ${provider}, claudeResultReceived: ${isClaudeStream ? claudeResultReceived : 'N/A'}, claudeResultIsError: ${isClaudeStream ? claudeResultIsError : 'N/A'}`);
+        console.log(`[agent-jobs] Process exited with code: ${code}, provider: ${provider}, resultReceived: ${resultReceived}, resultIsError: ${resultIsError}`);
 
         // Extract commit hash from output
         const commitMatch = job.output.match(/commit\s+([a-f0-9]{7,40})/i);
@@ -713,7 +823,7 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
         // 1. Exit code 0 (normal success)
         // 2. Has a commit hash (work was committed)
         // 3. Output contains success indicators
-        // 4. For Claude: received a result message with is_error: false
+        // 4. Received a result message with is_error: false
         const hasSuccessIndicators =
             job.output.includes('commit') ||
             job.output.includes('committed') ||
@@ -736,24 +846,24 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
             job.output.includes('FAILED') ||
             job.output.includes('❌ Task failed');
 
-        // For Claude with stream-json, success if:
+        // For JSON streaming providers, success if:
         // - We received a result message with is_error: false (most reliable)
         // - OR exit code 0
         // - OR we have success indicators and no clear failure indicators
-        const claudeSuccess = isClaudeStream && (
-            (claudeResultReceived && !claudeResultIsError) ||
+        const streamSuccess = isJsonStream && (
+            (resultReceived && !resultIsError) ||
             hasStreamedText && hasSuccessIndicators && !hasFailureIndicators
         );
 
         const success = code === 0 ||
             commitHash !== undefined ||
-            claudeSuccess ||
+            streamSuccess ||
             (code === null && hasSuccessIndicators && !hasFailureIndicators) ||
             (hasSuccessIndicators && !hasFailureIndicators && job.output.length > 500);
 
         job.status = success ? 'completed' : 'failed';
 
-        console.log(`[agent-jobs] Task marked as: ${job.status} (code: ${code}, commitHash: ${commitHash}, successIndicators: ${hasSuccessIndicators}, failureIndicators: ${hasFailureIndicators}, claudeSuccess: ${claudeSuccess}, claudeResultIsError: ${claudeResultIsError})`);
+        console.log(`[agent-jobs] Task marked as: ${job.status} (code: ${code}, commitHash: ${commitHash}, successIndicators: ${hasSuccessIndicators}, failureIndicators: ${hasFailureIndicators}, streamSuccess: ${streamSuccess}, resultIsError: ${resultIsError})`);
         logDebugState(`job-complete:${job.status}`);
 
         // Server completes the conversation (ComfyUI pattern: server handles completion)
