@@ -235,6 +235,52 @@ const STORE_NAMES = {
   pmRequests: 'pm_requests',
 } as const;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO BACKUP (to ~/.olly-molly/users/{email}/db-backup.json)
+// ═══════════════════════════════════════════════════════════════════════════
+const AUTO_BACKUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let autoBackupTimer: number | null = null;
+
+export function startAutoBackup(): void {
+  if (typeof window === 'undefined') return;
+  if (autoBackupTimer) return;
+
+  const run = async () => {
+    try {
+      // Fetch all data from server (source of truth)
+      const res = await fetch('/api/data/sync');
+      if (!res.ok) return;
+
+      const serverData = await res.json();
+      const email = userSettingsService.getEmailSync();
+      if (!email) return;
+
+      // Create backup payload
+      const backup = {
+        version: 1,
+        exported_at: new Date().toISOString(),
+        stores: serverData.data,
+        _email: email,
+      };
+
+      // Send to backup API
+      await fetch('/api/db/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backup),
+      });
+
+      dbDebug('autoBackup', '✓ Auto backup completed');
+    } catch (error) {
+      console.warn('[db] Auto backup failed', error);
+    }
+  };
+
+  // Run first backup after 30 seconds, then every 5 minutes
+  window.setTimeout(run, 30000);
+  autoBackupTimer = window.setInterval(run, AUTO_BACKUP_INTERVAL_MS);
+}
+
 /**
  * Create a MEMORY-ONLY collection.
  * All data is persisted on the server (JSON files at ~/.olly-molly/data/).
@@ -521,6 +567,11 @@ export function initClientDb(): Promise<void> {
       // STEP 5: Load data from server (non-blocking)
       // ─────────────────────────────────────────────────────────────────────
       void loadAllCollectionsFromServer();
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 6: Start auto backup
+      // ─────────────────────────────────────────────────────────────────────
+      startAutoBackup();
 
       // ─────────────────────────────────────────────────────────────────────
       // DONE
