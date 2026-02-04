@@ -166,6 +166,7 @@ const BROADCAST_CHANNEL_NAME = 'olly-molly-sync';
 let broadcastChannel: BroadcastChannel | null = null;
 let syncListeners: Array<(storeName: string) => void> = [];
 let isReloadingFromSync = false; // Prevent broadcast loop during reload
+let isDbInitialized = false; // Prevent sync before initialization completes
 
 function getBroadcastChannel(): BroadcastChannel | null {
   if (typeof window === 'undefined') return null;
@@ -761,6 +762,12 @@ const storeToCollection: Record<string, any> = {
  * Reload a collection from IndexedDB (used for cross-tab sync)
  */
 async function reloadCollectionFromDb(storeName: string): Promise<void> {
+  // Skip if DB not yet initialized (prevents conflict during init)
+  if (!isDbInitialized) {
+    console.log(`[db] Skipping reload for ${storeName} - DB not initialized yet`);
+    return;
+  }
+
   const collection = storeToCollection[storeName];
   if (!collection) return;
 
@@ -854,6 +861,10 @@ export function initClientDb(): Promise<void> {
 
     scheduleSqliteDump();
     startAutoBackup();
+
+    // Mark DB as initialized - now cross-tab sync can work
+    isDbInitialized = true;
+    console.log('[db] Client DB initialized, cross-tab sync enabled');
   })();
   return initPromise;
 }
