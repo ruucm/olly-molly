@@ -168,6 +168,10 @@ let syncListeners: Array<(storeName: string) => void> = [];
 let isReloadingFromSync = false; // Prevent broadcast loop during reload
 let isDbInitialized = false; // Prevent sync before initialization completes
 
+// Debounce broadcasts to prevent storms during rapid updates
+const BROADCAST_DEBOUNCE_MS = 300;
+const pendingBroadcasts = new Map<string, number>(); // storeName -> timeoutId
+
 function getBroadcastChannel(): BroadcastChannel | null {
   if (typeof window === 'undefined') return null;
   if (!broadcastChannel) {
@@ -176,7 +180,7 @@ function getBroadcastChannel(): BroadcastChannel | null {
       broadcastChannel.onmessage = (event) => {
         const { type, storeName } = event.data;
         if (type === 'sync') {
-          console.log(`[db] Received sync signal for ${storeName} from another tab`);
+          // Don't log every sync message to avoid console spam
           syncListeners.forEach((listener) => listener(storeName));
         }
       };
@@ -190,10 +194,25 @@ function getBroadcastChannel(): BroadcastChannel | null {
 function broadcastSync(storeName: string) {
   // Don't broadcast if we're reloading from another tab's sync
   if (isReloadingFromSync) return;
-  const channel = getBroadcastChannel();
-  if (channel) {
-    channel.postMessage({ type: 'sync', storeName });
+  // Don't broadcast if DB not initialized yet
+  if (!isDbInitialized) return;
+
+  // Debounce: cancel any pending broadcast for this store
+  const existingTimeout = pendingBroadcasts.get(storeName);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
   }
+
+  // Schedule new broadcast
+  const timeoutId = window.setTimeout(() => {
+    pendingBroadcasts.delete(storeName);
+    const channel = getBroadcastChannel();
+    if (channel) {
+      channel.postMessage({ type: 'sync', storeName });
+    }
+  }, BROADCAST_DEBOUNCE_MS);
+
+  pendingBroadcasts.set(storeName, timeoutId);
 }
 
 export function onCrossTabSync(listener: (storeName: string) => void): () => void {
@@ -725,16 +744,21 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
 const membersCollection = createIndexedDbCollection<Member>(STORE_NAMES.members);
 const marketAgentsCollection = createIndexedDbCollection<MarketAgent>(STORE_NAMES.marketAgents);
 const ticketsCollection = createIndexedDbCollection<Ticket>(STORE_NAMES.tickets);
-const activityLogsCollection = createIndexedDbCollection<ActivityLog>(STORE_NAMES.activityLogs);
+// Activity logs can accumulate during ticket operations; disable broadcast to reduce noise
+const activityLogsCollection = createIndexedDbCollectionWithOptions<ActivityLog>(
+  STORE_NAMES.activityLogs,
+  { broadcastSync: false },
+);
 const projectsCollection = createIndexedDbCollection<Project>(STORE_NAMES.projects);
 const agentWorkLogsCollection = createIndexedDbCollection<AgentWorkLog>(STORE_NAMES.agentWorkLogs);
 const conversationsCollection = createIndexedDbCollection<Conversation>(STORE_NAMES.conversations);
 // Conversation messages can grow rapidly while an agent is running. Avoid rebuilding the entire
 // sqlite dump on every streamed log append; the dump will still be refreshed by higher-level
 // updates (e.g. conversation completion, ticket changes).
+// Also disable broadcast sync to prevent log explosion during agent execution.
 const conversationMessagesCollection = createIndexedDbCollectionWithOptions<ConversationMessage>(
   STORE_NAMES.conversationMessages,
-  { scheduleSqliteDump: false },
+  { scheduleSqliteDump: false, broadcastSync: false },
 );
 const workflowsCollection = createIndexedDbCollection<Workflow>(STORE_NAMES.workflows);
 const workflowNodesCollection = createIndexedDbCollection<WorkflowNode>(STORE_NAMES.workflowNodes);
@@ -764,7 +788,6 @@ const storeToCollection: Record<string, any> = {
 async function reloadCollectionFromDb(storeName: string): Promise<void> {
   // Skip if DB not yet initialized (prevents conflict during init)
   if (!isDbInitialized) {
-    console.log(`[db] Skipping reload for ${storeName} - DB not initialized yet`);
     return;
   }
 
@@ -782,11 +805,14 @@ async function reloadCollectionFromDb(storeName: string): Promise<void> {
     const currentKeys = new Set(Array.from(collection.keys()));
     const newKeys = new Set(rows.map((row: { id: string }) => row.id));
 
+    let changeCount = 0;
+
     // Delete items that no longer exist
     currentKeys.forEach((key) => {
       const keyStr = key as string;
       if (!newKeys.has(keyStr)) {
         collection.delete(keyStr);
+        changeCount++;
       }
     });
 
@@ -797,13 +823,18 @@ async function reloadCollectionFromDb(storeName: string): Promise<void> {
         // Update if different
         if (JSON.stringify(existing) !== JSON.stringify(row)) {
           collection.update(row.id, () => row);
+          changeCount++;
         }
       } else {
         collection.insert(row);
+        changeCount++;
       }
     });
 
-    console.log(`[db] Reloaded ${storeName} from IndexedDB (${rows.length} items)`);
+    // Only log when there are actual changes
+    if (changeCount > 0) {
+      console.log(`[db:sync] ${storeName}: ${changeCount} changes applied`);
+    }
   } catch (error) {
     console.error(`[db] Failed to reload ${storeName}:`, error);
   } finally {
@@ -816,15 +847,7 @@ let initPromise: Promise<void> | null = null;
 export function initClientDb(): Promise<void> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    // Initialize BroadcastChannel for cross-tab sync
-    getBroadcastChannel();
-
-    // Register cross-tab sync listener
-    onCrossTabSync((storeName) => {
-      void reloadCollectionFromDb(storeName);
-    });
-
-    // Preload both collections
+    // Preload collections FIRST - before setting up any sync
     await Promise.all([
       membersCollection.preload(),
       marketAgentsCollection.preload(),
@@ -862,9 +885,16 @@ export function initClientDb(): Promise<void> {
     scheduleSqliteDump();
     startAutoBackup();
 
-    // Mark DB as initialized - now cross-tab sync can work
+    // Mark DB as initialized BEFORE setting up cross-tab sync
     isDbInitialized = true;
-    console.log('[db] Client DB initialized, cross-tab sync enabled');
+    console.log('[db] Client DB initialized');
+
+    // NOW set up BroadcastChannel for cross-tab sync (after DB is ready)
+    getBroadcastChannel();
+    onCrossTabSync((storeName) => {
+      void reloadCollectionFromDb(storeName);
+    });
+    console.log('[db] Cross-tab sync enabled');
   })();
   return initPromise;
 }
