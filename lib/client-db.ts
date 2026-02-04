@@ -161,14 +161,26 @@ export interface PmRequest {
 const DB_NAME = 'olly-molly';
 const DB_VERSION = 4;
 const BROADCAST_CHANNEL_NAME = 'olly-molly-sync';
+const DEBUG_STORAGE_KEY = 'olly-molly-debug';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DEBUG SYSTEM - Set to true to enable detailed initialization logging
+// DEBUG SYSTEM
+// Toggle with keyboard shortcut: Ctrl+Shift+D (or Cmd+Shift+D on Mac)
+// Or in console: window.toggleOllyDebug()
 // ═══════════════════════════════════════════════════════════════════════════
-const DEBUG_INIT = true;
+
+function isDebugEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(DEBUG_STORAGE_KEY) === 'true';
+}
+
+function setDebugEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(DEBUG_STORAGE_KEY, enabled ? 'true' : 'false');
+}
 
 function dbDebug(step: string, message: string, data?: unknown) {
-  if (!DEBUG_INIT) return;
+  if (!isDebugEnabled()) return;
   const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
   const prefix = `[db:${step}]`;
   if (data !== undefined) {
@@ -176,6 +188,32 @@ function dbDebug(step: string, message: string, data?: unknown) {
   } else {
     console.log(`${timestamp} ${prefix} ${message}`);
   }
+}
+
+// Toggle function exposed to window for console access
+function toggleOllyDebug(): boolean {
+  const newState = !isDebugEnabled();
+  setDebugEnabled(newState);
+  const status = newState ? '🟢 ON' : '🔴 OFF';
+  console.log(`%c[Olly-Molly Debug] ${status}`, 'font-size: 14px; font-weight: bold;');
+  if (newState) {
+    console.log('%cDebug logs will appear for DB operations. Press Ctrl+Shift+D to toggle off.', 'color: gray;');
+  }
+  return newState;
+}
+
+// Setup keyboard shortcut and expose toggle function
+if (typeof window !== 'undefined') {
+  // Expose to window for console access
+  (window as unknown as { toggleOllyDebug: typeof toggleOllyDebug }).toggleOllyDebug = toggleOllyDebug;
+
+  // Keyboard shortcut: Ctrl+Shift+D (Cmd+Shift+D on Mac)
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+      e.preventDefault();
+      toggleOllyDebug();
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
