@@ -23,6 +23,7 @@ export interface Member {
   can_generate_images: number;
   can_log_screenshots: number;
   source_market_agent_id: string | null;
+  order_index: number;
   created_at: string;
   updated_at: string;
 }
@@ -1152,7 +1153,13 @@ export function initClientDb(): Promise<void> {
 
 export function useMembers() {
   const { data } = useLiveQuery(() => membersCollection);
-  return (data ?? []) as Member[];
+  const members = (data ?? []) as Member[];
+  // Sort by order_index (default to created_at for backwards compatibility)
+  return members.sort((a, b) => {
+    const aIndex = a.order_index ?? new Date(a.created_at).getTime();
+    const bIndex = b.order_index ?? new Date(b.created_at).getTime();
+    return aIndex - bIndex;
+  });
 }
 
 export function useMarketAgents() {
@@ -1202,7 +1209,12 @@ export function useConversationMessages(conversationId: string | null) {
 
 export const memberService = {
   getAll(): Member[] {
-    return Array.from(membersCollection.values());
+    const members = Array.from(membersCollection.values());
+    return members.sort((a, b) => {
+      const aIndex = a.order_index ?? new Date(a.created_at).getTime();
+      const bIndex = b.order_index ?? new Date(b.created_at).getTime();
+      return aIndex - bIndex;
+    });
   },
   getById(id: string): Member | undefined {
     return membersCollection.get(id);
@@ -1235,6 +1247,9 @@ export const memberService = {
   },
   create(data: { role: string; name: string; avatar?: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean }): Member {
     const now = new Date().toISOString();
+    // Get max order_index to place new member at the end
+    const members = Array.from(membersCollection.values());
+    const maxOrderIndex = members.reduce((max, m) => Math.max(max, m.order_index ?? 0), 0);
     const member: Member = {
       id: uuidv4(),
       role: data.role,
@@ -1246,11 +1261,20 @@ export const memberService = {
       can_generate_images: data.can_generate_images ? 1 : 0,
       can_log_screenshots: data.can_log_screenshots ? 1 : 0,
       source_market_agent_id: null,
+      order_index: maxOrderIndex + 1,
       created_at: now,
       updated_at: now,
     };
     membersCollection.insert(member);
     return member;
+  },
+  reorder(members: { id: string; order_index: number }[]) {
+    members.forEach((m) => {
+      membersCollection.update(m.id, (draft) => {
+        draft.order_index = m.order_index;
+        draft.updated_at = new Date().toISOString();
+      });
+    });
   },
   delete(id: string): { success: boolean; error?: string } {
     const member = this.getById(id);
@@ -1266,6 +1290,9 @@ export const memberService = {
       throw new Error('Market agent not found');
     }
     const now = new Date().toISOString();
+    // Get max order_index to place new member at the end
+    const members = Array.from(membersCollection.values());
+    const maxOrderIndex = members.reduce((max, m) => Math.max(max, m.order_index ?? 0), 0);
     const member: Member = {
       id: uuidv4(),
       role: marketAgent.role,
@@ -1277,6 +1304,7 @@ export const memberService = {
       can_generate_images: marketAgent.can_generate_images,
       can_log_screenshots: marketAgent.can_log_screenshots,
       source_market_agent_id: marketAgent.id,
+      order_index: maxOrderIndex + 1,
       created_at: now,
       updated_at: now,
     };
