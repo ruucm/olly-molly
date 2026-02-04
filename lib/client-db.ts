@@ -54,6 +54,7 @@ export interface Ticket {
   project_id: string | null;
   created_by: string | null;
   order_index: number;
+  enable_screenshot: number;  // 0: 비활성화 (기본값), 1: 활성화
   created_at: string;
   updated_at: string;
 }
@@ -425,6 +426,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   project_id TEXT REFERENCES projects(id),
   created_by TEXT,
   order_index REAL DEFAULT 0,
+  enable_screenshot INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -544,11 +546,13 @@ async function persistSqliteDump() {
       'project_id',
       'created_by',
       'order_index',
+      'enable_screenshot',
       'created_at',
       'updated_at',
     ], tickets.map(t => ({
       ...t,
       assignee_ids: JSON.stringify(t.assignee_ids || []),
+      enable_screenshot: t.enable_screenshot ?? 0,
     } as any)));
 
     insertRows<ActivityLog>('activity_logs', [
@@ -990,7 +994,7 @@ export const ticketService = {
       });
     });
   },
-  create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_ids?: string[]; project_id?: string; created_by?: string; order_index?: number }): Ticket {
+  create(data: { title: string; description?: string; priority?: Ticket['priority']; assignee_ids?: string[]; project_id?: string; created_by?: string; order_index?: number; enable_screenshot?: number }): Ticket {
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: uuidv4(),
@@ -1002,6 +1006,7 @@ export const ticketService = {
       project_id: data.project_id || null,
       created_by: data.created_by || null,
       order_index: data.order_index ?? Date.now(),
+      enable_screenshot: data.enable_screenshot ?? 0,  // 기본값: 비활성화
       created_at: now,
       updated_at: now,
     };
@@ -1015,7 +1020,7 @@ export const ticketService = {
     });
     return ticket;
   },
-  update(id: string, data: Partial<Pick<Ticket, 'title' | 'description' | 'status' | 'priority' | 'assignee_ids'>>, updatedBy?: string): Ticket | undefined {
+  update(id: string, data: Partial<Pick<Ticket, 'title' | 'description' | 'status' | 'priority' | 'assignee_ids' | 'enable_screenshot'>>, updatedBy?: string): Ticket | undefined {
     const current = this.getById(id);
     if (!current) return undefined;
 
@@ -1025,6 +1030,7 @@ export const ticketService = {
       if (data.status !== undefined) draft.status = data.status;
       if (data.priority !== undefined) draft.priority = data.priority;
       if (data.assignee_ids !== undefined) draft.assignee_ids = data.assignee_ids;
+      if (data.enable_screenshot !== undefined) draft.enable_screenshot = data.enable_screenshot;
       draft.updated_at = new Date().toISOString();
     });
 

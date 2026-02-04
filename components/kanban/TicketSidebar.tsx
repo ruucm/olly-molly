@@ -80,6 +80,7 @@ interface Ticket {
     priority: string;
     assignee_ids: string[];
     assignees: Member[];
+    enable_screenshot?: number;
 }
 
 interface TicketSidebarProps {
@@ -154,6 +155,7 @@ export function TicketSidebar({
     const [status, setStatus] = useState('TODO');
     const [priority, setPriority] = useState('MEDIUM');
     const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+    const [enableScreenshot, setEnableScreenshot] = useState(false);
     const [feedback, setFeedback] = useState('');
     const [provider, setProvider] = useState<AgentProvider>('claude');
     const [providerLoaded, setProviderLoaded] = useState(false);
@@ -191,6 +193,7 @@ export function TicketSidebar({
             setStatus(ticket.status);
             setPriority(ticket.priority);
             setSelectedAssigneeIds(ticket.assignee_ids || []);
+            setEnableScreenshot((ticket.enable_screenshot ?? 0) === 1);
             setShowTicketDetails(true);
             // Reset executing state and conversation selection when switching tickets
             setExecuting(false);
@@ -400,6 +403,7 @@ export function TicketSidebar({
             status,
             priority,
             assignee_ids: selectedAssigneeIds,
+            enable_screenshot: enableScreenshot ? 1 : 0,
         });
     };
 
@@ -444,6 +448,7 @@ export function TicketSidebar({
                         id: persistedTicket.id,
                         title: persistedTicket.title,
                         description: persistedTicket.description,
+                        enable_screenshot: persistedTicket.enable_screenshot ?? 0,
                     },
                     agent: {
                         id: agent.id,
@@ -737,6 +742,20 @@ export function TicketSidebar({
                                 className="text-xs bg-secondary"
                                 disabled={executing}
                             />
+
+                            {/* Screenshot Option */}
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={enableScreenshot}
+                                    onChange={(e) => setEnableScreenshot(e.target.checked)}
+                                    disabled={executing}
+                                    className="w-4 h-4 rounded border-gray-300"
+                                />
+                                <span className="text-xs text-secondary">
+                                    📸 스크린샷 테스트 (Playwright)
+                                </span>
+                            </label>
 
                             {!hasActiveProject && (
                                 <p className="text-xs text-amber-400">⚠️ Select a project first</p>
