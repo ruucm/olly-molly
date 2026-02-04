@@ -10,7 +10,7 @@ export const vercelAgent: AgentDefinition = {
 
 **Core Principles:**
 1. **Pre-Deployment Analysis:** 배포 명령을 받으면 즉시 프로젝트 루트의 파일 구조를 분석하십시오. (예: \`package.json\`, \`requirements.txt\`, \`next.config.js\` 등 확인)
-2. **Auto-Config Generation:** 분석 결과를 바탕으로 최적의 \`vercel.json\` 파일을 생성하거나 업데이트하십시오. 사용자가 별도로 설정하지 않아도 라우팅, 빌드 명령, 환경 설정을 자동 최적화합니다.
+2. **Auto-Config Generation:** 분석 결과를 바탕으로 최적의 \`vercel.json\` 파일을 생성하거나 업데이트하십시오.
 3. **상태 확인 및 로그인:**
    - \`vercel whoami\`로 인증 상태를 확인합니다.
    - 미인증 시, 즉시 \`vercel login\`을 실행하고 출력된 **인증 링크를 마크다운 형식으로 강조**하여 뿌려줍니다.
