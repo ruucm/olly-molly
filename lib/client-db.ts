@@ -162,53 +162,79 @@ const DB_NAME = 'olly-molly';
 const DB_VERSION = 4;
 const BROADCAST_CHANNEL_NAME = 'olly-molly-sync';
 
-// BroadcastChannel for cross-tab synchronization
+// ═══════════════════════════════════════════════════════════════════════════
+// DEBUG SYSTEM - Set to true to enable detailed initialization logging
+// ═══════════════════════════════════════════════════════════════════════════
+const DEBUG_INIT = true;
+
+function dbDebug(step: string, message: string, data?: unknown) {
+  if (!DEBUG_INIT) return;
+  const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
+  const prefix = `[db:${step}]`;
+  if (data !== undefined) {
+    console.log(`${timestamp} ${prefix} ${message}`, data);
+  } else {
+    console.log(`${timestamp} ${prefix} ${message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INITIALIZATION STATE
+// ═══════════════════════════════════════════════════════════════════════════
+let isDbInitialized = false;
+let initStartTime = 0;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BROADCAST CHANNEL - Completely independent from initialization
+// ═══════════════════════════════════════════════════════════════════════════
 let broadcastChannel: BroadcastChannel | null = null;
 let syncListeners: Array<(storeName: string) => void> = [];
-let isReloadingFromSync = false; // Prevent broadcast loop during reload
-let isDbInitialized = false; // Prevent sync before initialization completes
+let isReloadingFromSync = false;
+let isBroadcastEnabled = false; // Only enable after init completes
 
-// Debounce broadcasts to prevent storms during rapid updates
 const BROADCAST_DEBOUNCE_MS = 300;
-const pendingBroadcasts = new Map<string, number>(); // storeName -> timeoutId
+const pendingBroadcasts = new Map<string, number>();
 
-function getBroadcastChannel(): BroadcastChannel | null {
-  if (typeof window === 'undefined') return null;
-  if (!broadcastChannel) {
-    try {
-      broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-      broadcastChannel.onmessage = (event) => {
-        const { type, storeName } = event.data;
-        if (type === 'sync') {
-          // Don't log every sync message to avoid console spam
-          syncListeners.forEach((listener) => listener(storeName));
-        }
-      };
-    } catch (error) {
-      console.warn('[db] BroadcastChannel not supported:', error);
-    }
+function setupBroadcastChannel(): void {
+  if (typeof window === 'undefined') return;
+  if (broadcastChannel) return;
+
+  try {
+    broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+    broadcastChannel.onmessage = (event) => {
+      // CRITICAL: Ignore ALL messages until DB is fully initialized
+      if (!isDbInitialized) {
+        dbDebug('broadcast', 'IGNORED sync message (DB not ready)', event.data);
+        return;
+      }
+
+      const { type, storeName } = event.data;
+      if (type === 'sync') {
+        dbDebug('broadcast', `Received sync for ${storeName}`);
+        syncListeners.forEach((listener) => listener(storeName));
+      }
+    };
+    dbDebug('broadcast', 'BroadcastChannel created');
+  } catch (error) {
+    console.warn('[db] BroadcastChannel not supported:', error);
   }
-  return broadcastChannel;
 }
 
 function broadcastSync(storeName: string) {
-  // Don't broadcast if we're reloading from another tab's sync
+  // Don't broadcast until explicitly enabled
+  if (!isBroadcastEnabled) return;
   if (isReloadingFromSync) return;
-  // Don't broadcast if DB not initialized yet
-  if (!isDbInitialized) return;
 
-  // Debounce: cancel any pending broadcast for this store
+  // Debounce
   const existingTimeout = pendingBroadcasts.get(storeName);
   if (existingTimeout) {
     clearTimeout(existingTimeout);
   }
 
-  // Schedule new broadcast
   const timeoutId = window.setTimeout(() => {
     pendingBroadcasts.delete(storeName);
-    const channel = getBroadcastChannel();
-    if (channel) {
-      channel.postMessage({ type: 'sync', storeName });
+    if (broadcastChannel) {
+      broadcastChannel.postMessage({ type: 'sync', storeName });
     }
   }, BROADCAST_DEBOUNCE_MS);
 
@@ -411,21 +437,34 @@ function createIndexedDbSync<T extends { id: string }>(storeName: StoreName): In
     sync: (params) => {
       syncParams = params;
       let cancelled = false;
+      dbDebug('sync', `[${storeName}] sync() called`);
+
       void (async () => {
         try {
+          dbDebug('sync', `[${storeName}] Opening IndexedDB...`);
           const db = await getIdb();
+          dbDebug('sync', `[${storeName}] IndexedDB opened, fetching rows...`);
+
           const rows = await db.getAll(storeName);
-          if (cancelled) return;
+          dbDebug('sync', `[${storeName}] Got ${rows.length} rows`);
+
+          if (cancelled) {
+            dbDebug('sync', `[${storeName}] CANCELLED`);
+            return;
+          }
           if (rows.length === 0) {
+            dbDebug('sync', `[${storeName}] Empty, calling markReady()`);
             params.markReady();
             return;
           }
           params.begin();
           rows.forEach((row) => params.write({ type: 'insert', value: row }));
           params.commit();
+          dbDebug('sync', `[${storeName}] Data written, calling markReady()`);
           params.markReady();
         } catch (error) {
           console.error(`[db] Failed to load ${storeName} from IndexedDB`, error);
+          dbDebug('sync', `[${storeName}] ERROR - calling markReady() anyway`);
           params.markReady();
         }
       })();
@@ -788,11 +827,15 @@ const storeToCollection: Record<string, any> = {
 async function reloadCollectionFromDb(storeName: string): Promise<void> {
   // Skip if DB not yet initialized (prevents conflict during init)
   if (!isDbInitialized) {
+    dbDebug('reload', `SKIP ${storeName} - DB not initialized`);
     return;
   }
 
   const collection = storeToCollection[storeName];
-  if (!collection) return;
+  if (!collection) {
+    dbDebug('reload', `SKIP ${storeName} - collection not found`);
+    return;
+  }
 
   // Prevent broadcast loop
   isReloadingFromSync = true;
@@ -833,10 +876,10 @@ async function reloadCollectionFromDb(storeName: string): Promise<void> {
 
     // Only log when there are actual changes
     if (changeCount > 0) {
-      console.log(`[db:sync] ${storeName}: ${changeCount} changes applied`);
+      dbDebug('reload', `${storeName}: ${changeCount} changes applied`);
     }
   } catch (error) {
-    console.error(`[db] Failed to reload ${storeName}:`, error);
+    dbDebug('reload', `ERROR ${storeName}:`, error);
   } finally {
     isReloadingFromSync = false;
   }
@@ -844,58 +887,168 @@ async function reloadCollectionFromDb(storeName: string): Promise<void> {
 
 let initPromise: Promise<void> | null = null;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// INITIALIZATION FLOW DIAGRAM
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │                        initClientDb() FLOW                              │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │                                                                         │
+// │  [STEP 1] initClientDb() called                                        │
+// │     │     Log: "[init:1] Starting initialization..."                   │
+// │     ▼                                                                   │
+// │  [STEP 2] preload() with TIMEOUT (10s)                                 │
+// │     │     Log: "[init:2] Preloading collections..."                    │
+// │     │     └─ membersCollection.preload()                               │
+// │     │     └─ marketAgentsCollection.preload()                          │
+// │     │                                                                   │
+// │     │     If TIMEOUT: Log "[init:2] ⚠️ TIMEOUT" → continue anyway      │
+// │     ▼                                                                   │
+// │  [STEP 3] Sync builtin agents                                          │
+// │     │     Log: "[init:3] Syncing builtin agents..."                    │
+// │     ▼                                                                   │
+// │  [STEP 4] Schedule dumps & backup                                      │
+// │     │     Log: "[init:4] Scheduling background tasks..."               │
+// │     ▼                                                                   │
+// │  [STEP 5] Mark as initialized                                          │
+// │     │     Log: "[init:5] ✅ DB initialized"                            │
+// │     │     isDbInitialized = true                                       │
+// │     ▼                                                                   │
+// │  [STEP 6] Setup BroadcastChannel (LAZY, after init)                    │
+// │     │     Log: "[init:6] Setting up cross-tab sync..."                 │
+// │     │     isBroadcastEnabled = true                                    │
+// │     ▼                                                                   │
+// │  [DONE] Promise resolves                                               │
+// │         Log: "[init:done] Initialization complete (XXXms)"             │
+// │                                                                         │
+// └─────────────────────────────────────────────────────────────────────────┘
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+const INIT_TIMEOUT_MS = 10000; // 10 seconds max for preload
+
+/**
+ * Wraps a promise with a timeout. Returns the result or undefined if timeout.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | undefined> {
+  return Promise.race([
+    promise,
+    new Promise<undefined>((resolve) => {
+      setTimeout(() => {
+        dbDebug('timeout', `⚠️ ${label} timed out after ${ms}ms`);
+        resolve(undefined);
+      }, ms);
+    }),
+  ]);
+}
+
 export function initClientDb(): Promise<void> {
-  if (initPromise) return initPromise;
+  if (initPromise) {
+    dbDebug('init:1', 'Already initializing, returning existing promise');
+    return initPromise;
+  }
+
+  initStartTime = Date.now();
+  dbDebug('init:1', '═══ Starting initialization ═══');
+
   initPromise = (async () => {
-    // Preload collections FIRST - before setting up any sync
-    await Promise.all([
-      membersCollection.preload(),
-      marketAgentsCollection.preload(),
-    ]);
+    try {
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 2: Preload with timeout
+      // ─────────────────────────────────────────────────────────────────────
+      dbDebug('init:2', 'Preloading collections (timeout: 10s)...');
 
-    // Sync builtin agents: add new ones from DEFAULT_AGENTS that aren't in market yet
-    const existingIds = new Set(
-      Array.from(marketAgentsCollection.values())
-        .filter((a) => a.is_builtin === 1)
-        .map((a) => a.id)
-    );
-
-    const newBuiltinAgents = DEFAULT_AGENTS.filter((agent) => !existingIds.has(agent.id));
-
-    if (newBuiltinAgents.length > 0) {
-      const now = new Date().toISOString();
-      marketAgentsCollection.insert(
-        newBuiltinAgents.map((agent) => {
-          const metadata = getAgentMetadata(agent.role);
-          return {
-            ...agent,
-            description: metadata.description,
-            category: metadata.category,
-            tags: metadata.tags,
-            is_builtin: 1,
-            created_at: now,
-            updated_at: now,
-          };
-        }),
+      const preloadResult = await withTimeout(
+        Promise.all([
+          membersCollection.preload(),
+          marketAgentsCollection.preload(),
+        ]),
+        INIT_TIMEOUT_MS,
+        'preload()',
       );
+
+      if (preloadResult === undefined) {
+        dbDebug('init:2', '⚠️ PRELOAD TIMEOUT - continuing with empty collections');
+        // Continue anyway - UI will show empty state but won't be stuck
+      } else {
+        dbDebug('init:2', '✓ Preload complete');
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 3: Sync builtin agents
+      // ─────────────────────────────────────────────────────────────────────
+      dbDebug('init:3', 'Syncing builtin agents...');
+
+      const existingIds = new Set(
+        Array.from(marketAgentsCollection.values())
+          .filter((a) => a.is_builtin === 1)
+          .map((a) => a.id)
+      );
+
+      const newBuiltinAgents = DEFAULT_AGENTS.filter((agent) => !existingIds.has(agent.id));
+
+      if (newBuiltinAgents.length > 0) {
+        const now = new Date().toISOString();
+        marketAgentsCollection.insert(
+          newBuiltinAgents.map((agent) => {
+            const metadata = getAgentMetadata(agent.role);
+            return {
+              ...agent,
+              description: metadata.description,
+              category: metadata.category,
+              tags: metadata.tags,
+              is_builtin: 1,
+              created_at: now,
+              updated_at: now,
+            };
+          }),
+        );
+        dbDebug('init:3', `✓ Added ${newBuiltinAgents.length} builtin agents`);
+      } else {
+        dbDebug('init:3', '✓ No new builtin agents to add');
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 4: Background tasks
+      // ─────────────────────────────────────────────────────────────────────
+      dbDebug('init:4', 'Scheduling background tasks...');
+      scheduleSqliteDump();
+      startAutoBackup();
+      dbDebug('init:4', '✓ Background tasks scheduled');
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 5: Mark as initialized
+      // ─────────────────────────────────────────────────────────────────────
+      isDbInitialized = true;
+      dbDebug('init:5', '✅ DB marked as initialized');
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 6: Setup BroadcastChannel (AFTER init complete)
+      // ─────────────────────────────────────────────────────────────────────
+      dbDebug('init:6', 'Setting up cross-tab sync...');
+      setupBroadcastChannel();
+      onCrossTabSync((storeName) => {
+        void reloadCollectionFromDb(storeName);
+      });
+      isBroadcastEnabled = true;
+      dbDebug('init:6', '✓ Cross-tab sync enabled');
+
+      // ─────────────────────────────────────────────────────────────────────
+      // DONE
+      // ─────────────────────────────────────────────────────────────────────
+      const elapsed = Date.now() - initStartTime;
+      dbDebug('init:done', `═══ Initialization complete (${elapsed}ms) ═══`);
+
+    } catch (error) {
+      const elapsed = Date.now() - initStartTime;
+      dbDebug('init:error', `❌ Initialization FAILED after ${elapsed}ms`, error);
+      // Still mark as initialized to prevent infinite loading
+      isDbInitialized = true;
+      throw error;
     }
-
-    // Note: Members collection starts empty. Users must add agents from market.
-
-    scheduleSqliteDump();
-    startAutoBackup();
-
-    // Mark DB as initialized BEFORE setting up cross-tab sync
-    isDbInitialized = true;
-    console.log('[db] Client DB initialized');
-
-    // NOW set up BroadcastChannel for cross-tab sync (after DB is ready)
-    getBroadcastChannel();
-    onCrossTabSync((storeName) => {
-      void reloadCollectionFromDb(storeName);
-    });
-    console.log('[db] Cross-tab sync enabled');
   })();
+
   return initPromise;
 }
 
