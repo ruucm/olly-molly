@@ -400,8 +400,10 @@ function getIdb(): Promise<IDBPDatabase> {
     return Promise.reject(new Error('IndexedDB is only available in the browser.'));
   }
   if (!dbPromise) {
+    dbDebug('idb', 'Opening IndexedDB connection...');
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion, newVersion) {
+        dbDebug('idb', `Upgrading DB from v${oldVersion} to v${newVersion}`);
         if (!db.objectStoreNames.contains(STORE_NAMES.members)) {
           db.createObjectStore(STORE_NAMES.members, { keyPath: 'id' });
         }
@@ -445,6 +447,27 @@ function getIdb(): Promise<IDBPDatabase> {
           db.createObjectStore(STORE_NAMES.meta, { keyPath: 'id' });
         }
       },
+      blocked(currentVersion, blockedVersion) {
+        // Another tab has an older version open and won't close
+        dbDebug('idb', `⚠️ BLOCKED! Current: v${currentVersion}, Blocked by: v${blockedVersion}`);
+        console.warn('[db] IndexedDB blocked by another tab. Please close other tabs or refresh them.');
+      },
+      blocking(currentVersion, blockedVersion) {
+        // This tab is blocking another tab from upgrading
+        dbDebug('idb', `⚠️ BLOCKING another tab! Current: v${currentVersion}, Other wants: v${blockedVersion}`);
+        // Close our connection to unblock the other tab
+        dbPromise?.then(db => db.close());
+        dbPromise = null;
+      },
+      terminated() {
+        dbDebug('idb', '❌ Connection terminated unexpectedly');
+        dbPromise = null;
+      },
+    });
+    dbPromise.then(() => {
+      dbDebug('idb', '✓ IndexedDB connection established');
+    }).catch((err) => {
+      dbDebug('idb', '❌ IndexedDB connection failed:', err);
     });
   }
   return dbPromise;
@@ -1490,13 +1513,20 @@ export const syncFromServer = {
   upsertConversation(data: Conversation): void {
     const existing = conversationsCollection.get(data.id);
     if (existing) {
-      conversationsCollection.update(data.id, (draft) => {
-        draft.status = data.status;
-        draft.git_commit_hash = data.git_commit_hash;
-        draft.completed_at = data.completed_at;
-      });
+      const hasChanges = existing.status !== data.status ||
+        existing.git_commit_hash !== data.git_commit_hash ||
+        existing.completed_at !== data.completed_at;
+      if (hasChanges) {
+        conversationsCollection.update(data.id, (draft) => {
+          draft.status = data.status;
+          draft.git_commit_hash = data.git_commit_hash;
+          draft.completed_at = data.completed_at;
+        });
+        dbDebug('syncFromServer', `conversation ${data.id.slice(0, 8)} updated (status: ${data.status})`);
+      }
     } else {
       conversationsCollection.insert(data);
+      dbDebug('syncFromServer', `conversation ${data.id.slice(0, 8)} inserted`);
     }
   },
 
@@ -1505,11 +1535,13 @@ export const syncFromServer = {
     const existing = conversationMessagesCollection.get(data.id);
     if (!existing) {
       conversationMessagesCollection.insert(data);
+      // Don't log every message to avoid spam during agent execution
     }
   },
 
   /** Batch sync conversations and messages from server */
   syncAll(conversations: Conversation[], messages: ConversationMessage[]): void {
+    dbDebug('syncFromServer', `syncAll called: ${conversations.length} convs, ${messages.length} msgs`);
     for (const conv of conversations) {
       this.upsertConversation(conv);
     }
@@ -1526,23 +1558,31 @@ export const syncFromServer = {
         draft.status = status;
         draft.updated_at = new Date().toISOString();
       });
-      console.log(`[syncFromServer] Ticket ${ticketId} status updated to ${status}`);
+      dbDebug('syncFromServer', `ticket ${ticketId.slice(0, 8)} status: ${existing.status} → ${status}`);
     }
   },
 
   /** Sync all ticket statuses from server (call on app load) */
   async syncAllTicketStatuses(): Promise<void> {
+    dbDebug('syncFromServer', 'syncAllTicketStatuses called');
     try {
       const res = await fetch('/api/tickets/sync');
       const data = await res.json();
       if (data.ticketStatuses) {
+        let updatedCount = 0;
         for (const statusUpdate of data.ticketStatuses) {
-          this.updateTicketStatus(statusUpdate.ticket_id, statusUpdate.status);
+          const existing = ticketsCollection.get(statusUpdate.ticket_id);
+          if (existing && existing.status !== statusUpdate.status) {
+            this.updateTicketStatus(statusUpdate.ticket_id, statusUpdate.status);
+            updatedCount++;
+          }
         }
-        console.log(`[syncFromServer] Synced ${data.ticketStatuses.length} ticket statuses from server`);
+        if (updatedCount > 0) {
+          dbDebug('syncFromServer', `✓ ${updatedCount} ticket statuses updated from server`);
+        }
       }
     } catch (error) {
-      console.error('[syncFromServer] Error syncing ticket statuses:', error);
+      dbDebug('syncFromServer', 'ERROR syncing ticket statuses:', error);
     }
   },
 };
