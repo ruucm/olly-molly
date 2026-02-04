@@ -247,6 +247,249 @@ type StoreName = (typeof STORE_NAMES)[keyof typeof STORE_NAMES];
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LAZY WRITE QUEUE SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+// Instead of writing to IndexedDB on every change, we batch writes with debouncing.
+// This prevents IndexedDB blocking when multiple tabs are active.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LAZY_WRITE_DEBOUNCE_MS = 3000; // 3 seconds debounce
+const LAZY_WRITE_MAX_WAIT_MS = 10000; // Max 10 seconds before forced flush
+
+interface PendingWrite {
+  type: 'put' | 'delete';
+  storeName: StoreName;
+  key: string;
+  value?: unknown;
+  timestamp: number;
+}
+
+// Pending writes queue - keyed by "storeName:key" to dedupe
+const pendingWrites = new Map<string, PendingWrite>();
+let lazyWriteTimer: number | null = null;
+let lazyWriteFirstPending: number | null = null;
+let isFlushingWrites = false;
+
+function dbDebugLazy(message: string, data?: unknown) {
+  if (!isDebugEnabled()) return;
+  const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
+  if (data !== undefined) {
+    console.log(`${timestamp} [db:lazy-write] ${message}`, data);
+  } else {
+    console.log(`${timestamp} [db:lazy-write] ${message}`);
+  }
+}
+
+/**
+ * Queue a write operation (debounced)
+ */
+function queueWrite(storeName: StoreName, key: string, value: unknown, type: 'put' | 'delete' = 'put'): void {
+  const writeKey = `${storeName}:${key}`;
+  const now = Date.now();
+
+  // Track first pending time for max wait
+  if (lazyWriteFirstPending === null) {
+    lazyWriteFirstPending = now;
+  }
+
+  pendingWrites.set(writeKey, {
+    type,
+    storeName,
+    key,
+    value: type === 'put' ? value : undefined,
+    timestamp: now,
+  });
+
+  // Clear existing timer
+  if (lazyWriteTimer !== null) {
+    window.clearTimeout(lazyWriteTimer);
+  }
+
+  // Check if we've waited too long (max wait exceeded)
+  const waitedMs = now - lazyWriteFirstPending;
+  if (waitedMs >= LAZY_WRITE_MAX_WAIT_MS) {
+    dbDebugLazy(`Max wait exceeded (${waitedMs}ms), flushing ${pendingWrites.size} writes`);
+    void flushPendingWrites();
+    return;
+  }
+
+  // Schedule debounced flush
+  lazyWriteTimer = window.setTimeout(() => {
+    lazyWriteTimer = null;
+    void flushPendingWrites();
+  }, LAZY_WRITE_DEBOUNCE_MS);
+}
+
+/**
+ * Flush all pending writes to IndexedDB
+ */
+async function flushPendingWrites(): Promise<void> {
+  if (pendingWrites.size === 0) return;
+  if (isFlushingWrites) {
+    dbDebugLazy('Already flushing, skipping');
+    return;
+  }
+
+  isFlushingWrites = true;
+  const startTime = Date.now();
+  const writeCount = pendingWrites.size;
+
+  // Copy and clear the queue
+  const writes = Array.from(pendingWrites.values());
+  pendingWrites.clear();
+  lazyWriteFirstPending = null;
+
+  dbDebugLazy(`Flushing ${writeCount} pending writes...`);
+
+  try {
+    const db = await getIdb();
+
+    // Group writes by store for efficient transactions
+    const byStore = new Map<StoreName, PendingWrite[]>();
+    for (const write of writes) {
+      const storeWrites = byStore.get(write.storeName) || [];
+      storeWrites.push(write);
+      byStore.set(write.storeName, storeWrites);
+    }
+
+    // Process each store in a single transaction
+    for (const [storeName, storeWrites] of byStore) {
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+
+      for (const write of storeWrites) {
+        if (write.type === 'put') {
+          store.put(write.value);
+        } else {
+          store.delete(write.key);
+        }
+      }
+
+      await tx.done;
+    }
+
+    const elapsed = Date.now() - startTime;
+    dbDebugLazy(`✓ Flushed ${writeCount} writes in ${elapsed}ms (${byStore.size} stores)`);
+
+  } catch (error) {
+    dbDebugLazy(`❌ Flush failed:`, error);
+    // Re-queue failed writes for retry
+    for (const write of writes) {
+      const writeKey = `${write.storeName}:${write.key}`;
+      if (!pendingWrites.has(writeKey)) {
+        pendingWrites.set(writeKey, write);
+      }
+    }
+  } finally {
+    isFlushingWrites = false;
+  }
+}
+
+/**
+ * Force flush all pending writes (sync, for beforeunload)
+ */
+function flushPendingWritesSync(): void {
+  if (pendingWrites.size === 0) return;
+
+  dbDebugLazy(`Sync flush on beforeunload: ${pendingWrites.size} writes`);
+
+  // Use sync IndexedDB API via navigator.sendBeacon workaround
+  // Actually, we'll just trigger the async flush and hope it completes
+  // For reliability, we also save to localStorage as emergency backup
+  try {
+    const writes = Array.from(pendingWrites.values());
+    const emergencyBackup = JSON.stringify(writes);
+    localStorage.setItem('olly-molly-pending-writes', emergencyBackup);
+    dbDebugLazy(`Emergency backup saved: ${writes.length} writes`);
+  } catch (e) {
+    // localStorage might be full, ignore
+  }
+
+  // Trigger async flush (may or may not complete before tab closes)
+  void flushPendingWrites();
+}
+
+/**
+ * Restore any emergency backup writes from localStorage
+ */
+async function restoreEmergencyWrites(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const backup = localStorage.getItem('olly-molly-pending-writes');
+    if (!backup) return;
+
+    const writes: PendingWrite[] = JSON.parse(backup);
+    if (!Array.isArray(writes) || writes.length === 0) {
+      localStorage.removeItem('olly-molly-pending-writes');
+      return;
+    }
+
+    dbDebugLazy(`Restoring ${writes.length} emergency writes`);
+
+    const db = await getIdb();
+    for (const write of writes) {
+      if (write.type === 'put' && write.value) {
+        await db.put(write.storeName, write.value);
+      } else if (write.type === 'delete') {
+        await db.delete(write.storeName, write.key);
+      }
+    }
+
+    localStorage.removeItem('olly-molly-pending-writes');
+    dbDebugLazy(`✓ Emergency writes restored`);
+  } catch (e) {
+    dbDebugLazy(`Emergency restore failed:`, e);
+    localStorage.removeItem('olly-molly-pending-writes');
+  }
+}
+
+/**
+ * Get count of pending writes (for debugging/monitoring)
+ */
+export function getPendingWritesCount(): number {
+  return pendingWrites.size;
+}
+
+/**
+ * Force flush all pending writes immediately
+ * Call this before critical operations or when you need writes to be persisted
+ */
+export async function forceFlushWrites(): Promise<void> {
+  dbDebugLazy(`Force flush requested: ${pendingWrites.size} pending writes`);
+  await flushPendingWrites();
+}
+
+// Expose to window for debugging
+if (typeof window !== 'undefined') {
+  (window as unknown as {
+    ollyDbStatus: () => { pendingWrites: number; isFlushingWrites: boolean };
+    ollyForceFlush: () => Promise<void>;
+  }).ollyDbStatus = () => ({
+    pendingWrites: pendingWrites.size,
+    isFlushingWrites,
+  });
+  (window as unknown as { ollyForceFlush: () => Promise<void> }).ollyForceFlush = forceFlushWrites;
+}
+
+// Setup beforeunload handler
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    flushPendingWritesSync();
+  });
+
+  // Also flush on visibilitychange (tab hidden)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && pendingWrites.size > 0) {
+      dbDebugLazy(`Tab hidden, flushing ${pendingWrites.size} writes`);
+      void flushPendingWrites();
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+
 const DB_BACKUP_VERSION = 1;
 const AUTO_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 const BACKUP_STORE_NAMES: StoreName[] = [
@@ -758,20 +1001,24 @@ function createIndexedDbCollection<T extends { id: string }>(storeName: StoreNam
     getKey: (item) => item.id,
     sync,
     onInsert: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      // Use lazy write queue instead of immediate IndexedDB write
+      for (const mutation of transaction.mutations) {
+        queueWrite(storeName, (mutation.modified as { id: string }).id, mutation.modified, 'put');
+      }
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
     },
     onUpdate: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      for (const mutation of transaction.mutations) {
+        queueWrite(storeName, (mutation.modified as { id: string }).id, mutation.modified, 'put');
+      }
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
     },
     onDelete: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
+      for (const mutation of transaction.mutations) {
+        queueWrite(storeName, mutation.key as string, undefined, 'delete');
+      }
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
     },
@@ -780,30 +1027,52 @@ function createIndexedDbCollection<T extends { id: string }>(storeName: StoreNam
 
 function createIndexedDbCollectionWithOptions<T extends { id: string }>(
   storeName: StoreName,
-  options?: { scheduleSqliteDump?: boolean; lazySync?: boolean },
+  options?: { scheduleSqliteDump?: boolean; lazySync?: boolean; lazyWrite?: boolean },
 ) {
   const shouldScheduleSqliteDump = options?.scheduleSqliteDump ?? true;
   const lazySync = options?.lazySync ?? false;
+  const lazyWrite = options?.lazyWrite ?? true; // Default to lazy write for better multi-tab performance
   const sync = createIndexedDbSync<T>(storeName, { lazySync });
+
   return createCollection<T>({
     id: storeName,
     getKey: (item) => item.id,
     sync,
     onInsert: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      if (lazyWrite) {
+        // Use lazy write queue (debounced, batched)
+        for (const mutation of transaction.mutations) {
+          queueWrite(storeName, (mutation.modified as { id: string }).id, mutation.modified, 'put');
+        }
+      } else {
+        // Immediate write (old behavior)
+        const db = await getIdb();
+        await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      }
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
     },
     onUpdate: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      if (lazyWrite) {
+        for (const mutation of transaction.mutations) {
+          queueWrite(storeName, (mutation.modified as { id: string }).id, mutation.modified, 'put');
+        }
+      } else {
+        const db = await getIdb();
+        await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
+      }
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
     },
     onDelete: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
+      if (lazyWrite) {
+        for (const mutation of transaction.mutations) {
+          queueWrite(storeName, mutation.key as string, undefined, 'delete');
+        }
+      } else {
+        const db = await getIdb();
+        await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
+      }
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
     },
@@ -1087,23 +1356,31 @@ export function initClientDb(): Promise<void> {
       }
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 4: Background tasks
+      // STEP 4: Restore any emergency writes from previous session
       // ─────────────────────────────────────────────────────────────────────
-      dbDebug('init:4', 'Scheduling background tasks...');
+      dbDebug('init:4', 'Restoring emergency writes if any...');
+      await restoreEmergencyWrites();
+      dbDebug('init:4', '✓ Emergency writes check complete');
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 5: Background tasks
+      // ─────────────────────────────────────────────────────────────────────
+      dbDebug('init:5', 'Scheduling background tasks...');
       scheduleSqliteDump();
       startAutoBackup();
-      dbDebug('init:4', '✓ Background tasks scheduled');
+      dbDebug('init:5', '✓ Background tasks scheduled');
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 5: Mark as initialized
+      // STEP 6: Mark as initialized
       // ─────────────────────────────────────────────────────────────────────
       isDbInitialized = true;
-      dbDebug('init:5', '✅ DB marked as initialized');
+      dbDebug('init:6', '✅ DB marked as initialized');
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 6: Start background data loading (non-blocking)
+      // STEP 7: Start background data loading (non-blocking)
       // ─────────────────────────────────────────────────────────────────────
       // Don't await - let it run in background while UI is shown
+      dbDebug('init:7', 'Starting background data loading...');
       void loadAllCollectionsFromDb();
 
       // ─────────────────────────────────────────────────────────────────────
