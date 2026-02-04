@@ -810,6 +810,29 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
   });
 }
 
+/**
+ * Create a MEMORY-ONLY collection (no IndexedDB persistence).
+ * Used for data that is already persisted on the server (conversations, messages).
+ * This prevents IndexedDB blocking when workflow is running in another tab.
+ */
+function createMemoryOnlyCollection<T extends { id: string }>(collectionId: string) {
+  // Minimal sync config that marks ready immediately (no IndexedDB access)
+  const memoryOnlySync: SyncConfig<T> = {
+    sync: (params) => {
+      // Mark ready immediately - no data to load
+      params.markReady();
+      return () => {}; // cleanup function
+    },
+  };
+
+  return createCollection<T>({
+    id: collectionId,
+    getKey: (item) => item.id,
+    sync: memoryOnlySync,
+    // No onInsert/onUpdate/onDelete - changes stay in memory only
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ALL COLLECTIONS USE LAZY SYNC
 // ═══════════════════════════════════════════════════════════════════════════
@@ -842,13 +865,18 @@ const agentWorkLogsCollection = createIndexedDbCollectionWithOptions<AgentWorkLo
   STORE_NAMES.agentWorkLogs,
   { lazySync: true },
 );
-const conversationsCollection = createIndexedDbCollectionWithOptions<Conversation>(
+// ═══════════════════════════════════════════════════════════════════════════
+// MEMORY-ONLY COLLECTIONS (no IndexedDB persistence)
+// ═══════════════════════════════════════════════════════════════════════════
+// Conversations and messages are stored on the server (server-store.ts).
+// Browser fetches via polling and keeps in memory for reactive UI.
+// NOT persisted to IndexedDB to prevent blocking when workflows run.
+// ═══════════════════════════════════════════════════════════════════════════
+const conversationsCollection = createMemoryOnlyCollection<Conversation>(
   STORE_NAMES.conversations,
-  { lazySync: true },
 );
-const conversationMessagesCollection = createIndexedDbCollectionWithOptions<ConversationMessage>(
+const conversationMessagesCollection = createMemoryOnlyCollection<ConversationMessage>(
   STORE_NAMES.conversationMessages,
-  { scheduleSqliteDump: false, lazySync: true },
 );
 const workflowsCollection = createIndexedDbCollectionWithOptions<Workflow>(
   STORE_NAMES.workflows,
@@ -900,6 +928,8 @@ async function loadAllCollectionsFromDb(): Promise<void> {
     };
 
     // Load collections in parallel
+    // NOTE: conversations and conversationMessages are MEMORY-ONLY (not persisted to IndexedDB)
+    // They are populated via server polling (syncFromServer)
     await Promise.all([
       loadCollection(STORE_NAMES.members, membersCollection),
       loadCollection(STORE_NAMES.marketAgents, marketAgentsCollection),
@@ -907,8 +937,8 @@ async function loadAllCollectionsFromDb(): Promise<void> {
       loadCollection(STORE_NAMES.activityLogs, activityLogsCollection),
       loadCollection(STORE_NAMES.projects, projectsCollection),
       loadCollection(STORE_NAMES.agentWorkLogs, agentWorkLogsCollection),
-      loadCollection(STORE_NAMES.conversations, conversationsCollection),
-      // conversation_messages excluded - loaded on demand
+      // conversations - MEMORY ONLY (server is source of truth)
+      // conversationMessages - MEMORY ONLY (server is source of truth)
       loadCollection(STORE_NAMES.workflows, workflowsCollection),
       loadCollection(STORE_NAMES.workflowNodes, workflowNodesCollection),
       loadCollection(STORE_NAMES.workflowEdges, workflowEdgesCollection),
