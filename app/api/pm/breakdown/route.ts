@@ -74,7 +74,8 @@ IMPORTANT RULES:
 - Use Korean for titles and descriptions
 - AVOID creating duplicate tasks that already exist on the board
 - ORDER tasks by execution sequence (tasks that must be done first should come first)
-- PREFIX each task title with a sequence number (e.g., "1. 로그인 화면 UI 구현", "2. 백엔드 API 연동")${maxTickets ? `\n- CRITICAL: You MUST create AT MOST ${maxTickets} tasks. Prioritize the most important tasks if you need to limit.` : ''}`;
+- PREFIX each task title with a sequence number (e.g., "1. 로그인 화면 UI 구현", "2. 백엔드 API 연동")
+- CRITICAL: If the feature request contains environment variables (DB URL, API keys, credentials, etc.), you MUST include those values in the description of EVERY relevant task. For example, if DB_URL=postgres://... is provided, include it in tasks that need database access.${maxTickets ? `\n- CRITICAL: You MUST create AT MOST ${maxTickets} tasks. Prioritize the most important tasks if you need to limit.` : ''}`;
 
     if (existingTickets && existingTickets.length > 0) {
         prompt += `\n\n## EXISTING TICKETS ON THE BOARD\nThe following tickets already exist. Avoid creating duplicate or overlapping tasks:\n`;
