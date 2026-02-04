@@ -810,27 +810,117 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
   });
 }
 
-const membersCollection = createIndexedDbCollection<Member>(STORE_NAMES.members);
-const marketAgentsCollection = createIndexedDbCollection<MarketAgent>(STORE_NAMES.marketAgents);
-const ticketsCollection = createIndexedDbCollection<Ticket>(STORE_NAMES.tickets);
-const activityLogsCollection = createIndexedDbCollection<ActivityLog>(STORE_NAMES.activityLogs);
-const projectsCollection = createIndexedDbCollection<Project>(STORE_NAMES.projects);
-const agentWorkLogsCollection = createIndexedDbCollection<AgentWorkLog>(STORE_NAMES.agentWorkLogs);
-const conversationsCollection = createIndexedDbCollection<Conversation>(STORE_NAMES.conversations);
-// Conversation messages can grow rapidly (6000+ messages).
-// - scheduleSqliteDump: false - don't rebuild SQL dump on every message
-// - lazySync: true - DON'T load all messages on startup (causes IndexedDB blocking!)
-//   Messages are loaded on-demand via syncFromServer when viewing a ticket.
+// ═══════════════════════════════════════════════════════════════════════════
+// ALL COLLECTIONS USE LAZY SYNC
+// ═══════════════════════════════════════════════════════════════════════════
+// When multiple tabs are active, new tabs can experience 10+ second delays
+// connecting to IndexedDB due to browser-level throttling/queueing.
+// Lazy sync skips initial data load, allowing the app to start immediately.
+// Data is loaded in the background after initialization.
+// ═══════════════════════════════════════════════════════════════════════════
+const membersCollection = createIndexedDbCollectionWithOptions<Member>(
+  STORE_NAMES.members,
+  { lazySync: true },
+);
+const marketAgentsCollection = createIndexedDbCollectionWithOptions<MarketAgent>(
+  STORE_NAMES.marketAgents,
+  { lazySync: true },
+);
+const ticketsCollection = createIndexedDbCollectionWithOptions<Ticket>(
+  STORE_NAMES.tickets,
+  { lazySync: true },
+);
+const activityLogsCollection = createIndexedDbCollectionWithOptions<ActivityLog>(
+  STORE_NAMES.activityLogs,
+  { lazySync: true },
+);
+const projectsCollection = createIndexedDbCollectionWithOptions<Project>(
+  STORE_NAMES.projects,
+  { lazySync: true },
+);
+const agentWorkLogsCollection = createIndexedDbCollectionWithOptions<AgentWorkLog>(
+  STORE_NAMES.agentWorkLogs,
+  { lazySync: true },
+);
+const conversationsCollection = createIndexedDbCollectionWithOptions<Conversation>(
+  STORE_NAMES.conversations,
+  { lazySync: true },
+);
 const conversationMessagesCollection = createIndexedDbCollectionWithOptions<ConversationMessage>(
   STORE_NAMES.conversationMessages,
   { scheduleSqliteDump: false, lazySync: true },
 );
-const workflowsCollection = createIndexedDbCollection<Workflow>(STORE_NAMES.workflows);
-const workflowNodesCollection = createIndexedDbCollection<WorkflowNode>(STORE_NAMES.workflowNodes);
-const workflowEdgesCollection = createIndexedDbCollection<WorkflowEdge>(STORE_NAMES.workflowEdges);
-const pmRequestsCollection = createIndexedDbCollection<PmRequest>(STORE_NAMES.pmRequests);
+const workflowsCollection = createIndexedDbCollectionWithOptions<Workflow>(
+  STORE_NAMES.workflows,
+  { lazySync: true },
+);
+const workflowNodesCollection = createIndexedDbCollectionWithOptions<WorkflowNode>(
+  STORE_NAMES.workflowNodes,
+  { lazySync: true },
+);
+const workflowEdgesCollection = createIndexedDbCollectionWithOptions<WorkflowEdge>(
+  STORE_NAMES.workflowEdges,
+  { lazySync: true },
+);
+const pmRequestsCollection = createIndexedDbCollectionWithOptions<PmRequest>(
+  STORE_NAMES.pmRequests,
+  { lazySync: true },
+);
 
 let initPromise: Promise<void> | null = null;
+
+/**
+ * Load all data from IndexedDB into collections (background loading after init)
+ * This runs AFTER the app is shown, so UI is responsive immediately.
+ */
+async function loadAllCollectionsFromDb(): Promise<void> {
+  dbDebug('bgload', 'Starting background data load...');
+  const startTime = Date.now();
+
+  try {
+    const db = await getIdb();
+
+    // Load each collection from IndexedDB
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loadCollection = async (storeName: string, collection: any) => {
+      try {
+        const rows = await db.getAll(storeName) as Array<{ id: string }>;
+        if (rows.length > 0) {
+          // Insert all rows that don't already exist
+          const existingIds = new Set(Array.from(collection.keys()));
+          const newRows = rows.filter((row) => !existingIds.has(row.id));
+          if (newRows.length > 0) {
+            collection.insert(newRows);
+          }
+          dbDebug('bgload', `[${storeName}] Loaded ${rows.length} rows (${newRows.length} new)`);
+        }
+      } catch (error) {
+        dbDebug('bgload', `[${storeName}] Error:`, error);
+      }
+    };
+
+    // Load collections in parallel
+    await Promise.all([
+      loadCollection(STORE_NAMES.members, membersCollection),
+      loadCollection(STORE_NAMES.marketAgents, marketAgentsCollection),
+      loadCollection(STORE_NAMES.tickets, ticketsCollection),
+      loadCollection(STORE_NAMES.activityLogs, activityLogsCollection),
+      loadCollection(STORE_NAMES.projects, projectsCollection),
+      loadCollection(STORE_NAMES.agentWorkLogs, agentWorkLogsCollection),
+      loadCollection(STORE_NAMES.conversations, conversationsCollection),
+      // conversation_messages excluded - loaded on demand
+      loadCollection(STORE_NAMES.workflows, workflowsCollection),
+      loadCollection(STORE_NAMES.workflowNodes, workflowNodesCollection),
+      loadCollection(STORE_NAMES.workflowEdges, workflowEdgesCollection),
+      loadCollection(STORE_NAMES.pmRequests, pmRequestsCollection),
+    ]);
+
+    const elapsed = Date.now() - startTime;
+    dbDebug('bgload', `✓ Background load complete (${elapsed}ms)`);
+  } catch (error) {
+    dbDebug('bgload', '❌ Background load failed:', error);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INITIALIZATION FLOW DIAGRAM
@@ -867,23 +957,6 @@ let initPromise: Promise<void> | null = null;
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
-const INIT_TIMEOUT_MS = 10000; // 10 seconds max for preload
-
-/**
- * Wraps a promise with a timeout. Returns the result or undefined if timeout.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | undefined> {
-  return Promise.race([
-    promise,
-    new Promise<undefined>((resolve) => {
-      setTimeout(() => {
-        dbDebug('timeout', `⚠️ ${label} timed out after ${ms}ms`);
-        resolve(undefined);
-      }, ms);
-    }),
-  ]);
-}
-
 export function initClientDb(): Promise<void> {
   if (initPromise) {
     dbDebug('init:1', 'Already initializing, returning existing promise');
@@ -896,25 +969,28 @@ export function initClientDb(): Promise<void> {
   initPromise = (async () => {
     try {
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 2: Preload with timeout
+      // STEP 2: Preload all collections (instant with lazySync)
       // ─────────────────────────────────────────────────────────────────────
-      dbDebug('init:2', 'Preloading collections (timeout: 10s)...');
+      // With lazySync, preload() just calls markReady() without loading data.
+      // Data will be loaded in background after init (STEP 6).
+      dbDebug('init:2', 'Preloading collections (lazySync mode - instant)...');
 
-      const preloadResult = await withTimeout(
-        Promise.all([
-          membersCollection.preload(),
-          marketAgentsCollection.preload(),
-        ]),
-        INIT_TIMEOUT_MS,
-        'preload()',
-      );
+      await Promise.all([
+        membersCollection.preload(),
+        marketAgentsCollection.preload(),
+        ticketsCollection.preload(),
+        activityLogsCollection.preload(),
+        projectsCollection.preload(),
+        agentWorkLogsCollection.preload(),
+        conversationsCollection.preload(),
+        conversationMessagesCollection.preload(),
+        workflowsCollection.preload(),
+        workflowNodesCollection.preload(),
+        workflowEdgesCollection.preload(),
+        pmRequestsCollection.preload(),
+      ]);
 
-      if (preloadResult === undefined) {
-        dbDebug('init:2', '⚠️ PRELOAD TIMEOUT - continuing with empty collections');
-        // Continue anyway - UI will show empty state but won't be stuck
-      } else {
-        dbDebug('init:2', '✓ Preload complete');
-      }
+      dbDebug('init:2', '✓ All collections marked ready');
 
       // ─────────────────────────────────────────────────────────────────────
       // STEP 3: Sync builtin agents
@@ -963,6 +1039,12 @@ export function initClientDb(): Promise<void> {
       // ─────────────────────────────────────────────────────────────────────
       isDbInitialized = true;
       dbDebug('init:5', '✅ DB marked as initialized');
+
+      // ─────────────────────────────────────────────────────────────────────
+      // STEP 6: Start background data loading (non-blocking)
+      // ─────────────────────────────────────────────────────────────────────
+      // Don't await - let it run in background while UI is shown
+      void loadAllCollectionsFromDb();
 
       // ─────────────────────────────────────────────────────────────────────
       // DONE
