@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     DndContext,
     DragOverlay,
@@ -87,6 +87,13 @@ export function KanbanBoard({
     const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
     const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
 
+    // Use ref to store onRefresh callback to avoid infinite loop
+    // (effect depends on onRefresh → calls onRefresh → parent re-renders → new onRefresh → effect re-runs)
+    const onRefreshRef = useRef(onRefresh);
+    useEffect(() => {
+        onRefreshRef.current = onRefresh;
+    }, [onRefresh]);
+
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {
@@ -113,16 +120,31 @@ export function KanbanBoard({
 
     // Poll for running jobs
     useEffect(() => {
+        // Track previously seen completed job IDs to avoid calling onRefresh repeatedly
+        const seenCompletedJobIds = new Set<string>();
+
         const fetchRunningJobs = async () => {
             try {
                 const res = await fetch('/api/agent/status');
                 const data = await res.json();
-                setRunningJobs(data.jobs || []);
+                const jobs: RunningJob[] = data.jobs || [];
+                setRunningJobs(jobs);
 
-                // If any job just completed, refresh the board
-                const hasCompleted = data.jobs?.some((job: RunningJob) => job.status !== 'running');
-                if (hasCompleted) {
-                    onRefresh?.();
+                // Check for newly completed jobs (not previously seen)
+                const newlyCompleted = jobs.filter(
+                    (job: RunningJob) => job.status !== 'running' && !seenCompletedJobIds.has(job.id)
+                );
+
+                // Mark as seen
+                for (const job of jobs) {
+                    if (job.status !== 'running') {
+                        seenCompletedJobIds.add(job.id);
+                    }
+                }
+
+                // Only refresh once for newly completed jobs
+                if (newlyCompleted.length > 0) {
+                    onRefreshRef.current?.();
                 }
             } catch (error) {
                 console.error('Failed to fetch running jobs:', error);
@@ -132,7 +154,7 @@ export function KanbanBoard({
         fetchRunningJobs();
         const interval = setInterval(fetchRunningJobs, 3000);
         return () => clearInterval(interval);
-    }, [onRefresh]);
+    }, []); // Empty dependency - uses ref for callback
 
     const isTicketRunning = useCallback((ticketId: string) => {
         return runningJobs.some(job => job.ticketId === ticketId && job.status === 'running');
