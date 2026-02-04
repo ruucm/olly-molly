@@ -1,6 +1,6 @@
 'use client';
 
-import { TextareaHTMLAttributes, forwardRef, useEffect, useRef, useCallback } from 'react';
+import { TextareaHTMLAttributes, forwardRef, useEffect, useRef, useCallback, useState } from 'react';
 
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
     label?: string;
@@ -14,6 +14,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     ({ className = '', label, error, autoResize = false, minRows = 2, maxRows = 10, onChange, ...props }, ref) => {
         const internalRef = useRef<HTMLTextAreaElement>(null);
         const textareaRef = (ref as React.RefObject<HTMLTextAreaElement>) || internalRef;
+        const [isAtMaxHeight, setIsAtMaxHeight] = useState(false);
 
         const adjustHeight = useCallback(() => {
             const textarea = textareaRef.current;
@@ -25,8 +26,12 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
             const paddingBottom = parseInt(getComputedStyle(textarea).paddingBottom) || 8;
             const minHeight = lineHeight * minRows + paddingTop + paddingBottom;
             const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
-            const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight);
+            const scrollHeight = textarea.scrollHeight;
+            const newHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
             textarea.style.height = `${newHeight}px`;
+
+            // Enable scroll when content exceeds maxHeight
+            setIsAtMaxHeight(scrollHeight > maxHeight);
         }, [autoResize, minRows, maxRows, textareaRef]);
 
         useEffect(() => {
@@ -57,7 +62,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                         transition-colors duration-150 resize-none
                         focus:outline-none focus:border-[var(--text-primary)]
                         ${error ? 'border-[var(--priority-high-text)]' : ''}
-                        ${autoResize ? 'overflow-hidden' : ''}
+                        ${autoResize ? (isAtMaxHeight ? 'overflow-y-auto' : 'overflow-hidden') : ''}
                         ${className}
                     `}
                     onChange={handleChange}
