@@ -551,17 +551,33 @@ function createIndexedDbSync<T extends { id: string }>(
 }
 
 let sqliteDumpTimer: number | null = null;
+let sqliteDumpEnabled = false; // DISABLED by default - causes IndexedDB blocking with multiple tabs
 
 function scheduleSqliteDump() {
+  // DISABLED: Multiple tabs writing to sqlite_dump simultaneously causes IndexedDB blocking
+  // SQL dump is only needed for data export, not real-time. Use manual backup instead.
+  if (!sqliteDumpEnabled) return;
+
   if (typeof window === 'undefined') return;
   if (sqliteDumpTimer) {
     window.clearTimeout(sqliteDumpTimer);
   }
-  // 2 second debounce to prevent frequent writes during rapid updates
+  // 10 second debounce to prevent frequent writes
   sqliteDumpTimer = window.setTimeout(() => {
     sqliteDumpTimer = null;
     void persistSqliteDump();
-  }, 2000);
+  }, 10000);
+}
+
+// Enable/disable sqlite dump (for debugging)
+export function setSqliteDumpEnabled(enabled: boolean): void {
+  sqliteDumpEnabled = enabled;
+  dbDebug('sqliteDump', `SQL dump ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+// Manual trigger for sqlite dump (for backup export)
+export async function triggerSqliteDump(): Promise<void> {
+  await persistSqliteDump();
 }
 
 function sqlEscape(value: string): string {
