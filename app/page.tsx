@@ -246,6 +246,10 @@ export default function Dashboard() {
     }
   }, []);
 
+  const handleMemberReorder = useCallback((updates: { id: string; order_index: number }[]) => {
+    memberService.reorder(updates);
+  }, []);
+
   const handleAddFromMarket = useCallback((agentId: string) => {
     try {
       memberService.addFromMarket(agentId);
@@ -761,6 +765,7 @@ export default function Dashboard() {
               onUpdateMember={handleMemberUpdate}
               onCreateMember={handleMemberCreate}
               onDeleteMember={handleMemberDelete}
+              onReorderMembers={handleMemberReorder}
               onOpenMarket={() => setMarketModalOpen(true)}
             />
           </div>
