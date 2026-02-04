@@ -477,8 +477,12 @@ type IndexedDbSync<T extends { id: string }> = SyncConfig<T> & {
   confirmOperationsSync: (mutations: Array<PendingMutation<T>>) => void;
 };
 
-function createIndexedDbSync<T extends { id: string }>(storeName: StoreName): IndexedDbSync<T> {
+function createIndexedDbSync<T extends { id: string }>(
+  storeName: StoreName,
+  options?: { lazySync?: boolean },
+): IndexedDbSync<T> {
   let syncParams: Parameters<SyncConfig<T>['sync']>[0] | null = null;
+  const lazySync = options?.lazySync ?? false;
 
   const confirmOperationsSync = (mutations: Array<PendingMutation<T>>) => {
     if (!syncParams) return;
@@ -498,7 +502,15 @@ function createIndexedDbSync<T extends { id: string }>(storeName: StoreName): In
     sync: (params) => {
       syncParams = params;
       let cancelled = false;
-      dbDebug('sync', `[${storeName}] sync() called`);
+      dbDebug('sync', `[${storeName}] sync() called${lazySync ? ' (LAZY)' : ''}`);
+
+      // Lazy sync: skip initial data load, just mark ready immediately
+      // Data will be loaded on-demand via syncFromServer
+      if (lazySync) {
+        dbDebug('sync', `[${storeName}] Lazy sync - skipping initial load, markReady()`);
+        params.markReady();
+        return () => { cancelled = true; };
+      }
 
       void (async () => {
         try {
@@ -815,11 +827,12 @@ function createIndexedDbCollection<T extends { id: string }>(storeName: StoreNam
 
 function createIndexedDbCollectionWithOptions<T extends { id: string }>(
   storeName: StoreName,
-  options?: { scheduleSqliteDump?: boolean; broadcastSync?: boolean },
+  options?: { scheduleSqliteDump?: boolean; broadcastSync?: boolean; lazySync?: boolean },
 ) {
   const shouldScheduleSqliteDump = options?.scheduleSqliteDump ?? true;
   const shouldBroadcastSync = options?.broadcastSync ?? true;
-  const sync = createIndexedDbSync<T>(storeName);
+  const lazySync = options?.lazySync ?? false;
+  const sync = createIndexedDbSync<T>(storeName, { lazySync });
   return createCollection<T>({
     id: storeName,
     getKey: (item) => item.id,
@@ -859,13 +872,14 @@ const activityLogsCollection = createIndexedDbCollectionWithOptions<ActivityLog>
 const projectsCollection = createIndexedDbCollection<Project>(STORE_NAMES.projects);
 const agentWorkLogsCollection = createIndexedDbCollection<AgentWorkLog>(STORE_NAMES.agentWorkLogs);
 const conversationsCollection = createIndexedDbCollection<Conversation>(STORE_NAMES.conversations);
-// Conversation messages can grow rapidly while an agent is running. Avoid rebuilding the entire
-// sqlite dump on every streamed log append; the dump will still be refreshed by higher-level
-// updates (e.g. conversation completion, ticket changes).
-// Also disable broadcast sync to prevent log explosion during agent execution.
+// Conversation messages can grow rapidly (6000+ messages).
+// - scheduleSqliteDump: false - don't rebuild SQL dump on every message
+// - broadcastSync: false - don't broadcast every message to other tabs
+// - lazySync: true - DON'T load all messages on startup (causes IndexedDB blocking!)
+//   Messages are loaded on-demand via syncFromServer when viewing a ticket.
 const conversationMessagesCollection = createIndexedDbCollectionWithOptions<ConversationMessage>(
   STORE_NAMES.conversationMessages,
-  { scheduleSqliteDump: false, broadcastSync: false },
+  { scheduleSqliteDump: false, broadcastSync: false, lazySync: true },
 );
 const workflowsCollection = createIndexedDbCollection<Workflow>(STORE_NAMES.workflows);
 const workflowNodesCollection = createIndexedDbCollection<WorkflowNode>(STORE_NAMES.workflowNodes);
