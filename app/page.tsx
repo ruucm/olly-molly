@@ -155,17 +155,35 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    // INSTANT: Get email from localStorage (sync, no IndexedDB blocking)
+    const cachedEmail = userSettingsService.getEmailSync();
+    if (cachedEmail) {
+      setUserEmail(cachedEmail);
+      setEmailChecked(true);
+    }
+
     initClientDb()
-      .then(async () => {
-        const email = await userSettingsService.getEmail();
-        setUserEmail(email);
-        setEmailChecked(true);
+      .then(() => {
+        // UI shows immediately after init
+        setLoading(false);
+
+        // If no cached email, try IndexedDB in background (non-blocking for UI)
+        if (!cachedEmail) {
+          userSettingsService.getEmail()
+            .then((email) => {
+              setUserEmail(email);
+              setEmailChecked(true);
+            })
+            .catch((error) => {
+              console.error('Failed to get user email:', error);
+              setEmailChecked(true); // Still show UI
+            });
+        }
       })
       .catch((error) => {
         console.error('Failed to initialize local database:', error);
-      })
-      .finally(() => {
         setLoading(false);
+        setEmailChecked(true);
       });
   }, []);
 

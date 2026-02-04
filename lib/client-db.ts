@@ -864,121 +864,88 @@ function createMemoryOnlyCollection<T extends { id: string }>(collectionId: stri
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ALL COLLECTIONS USE LAZY SYNC
+// ALL COLLECTIONS ARE MEMORY-ONLY (no IndexedDB persistence)
 // ═══════════════════════════════════════════════════════════════════════════
-// When multiple tabs are active, new tabs can experience 10+ second delays
-// connecting to IndexedDB due to browser-level throttling/queueing.
-// Lazy sync skips initial data load, allowing the app to start immediately.
-// Data is loaded in the background after initialization.
+// IndexedDB has severe multi-tab blocking issues. When one tab is writing,
+// other tabs can be blocked indefinitely from connecting.
+//
+// Solution: All data is stored on the server. Browser keeps data in memory
+// for reactive UI (useLiveQuery), and syncs with server via API.
 // ═══════════════════════════════════════════════════════════════════════════
-const membersCollection = createIndexedDbCollectionWithOptions<Member>(
-  STORE_NAMES.members,
-  { lazySync: true },
-);
-const marketAgentsCollection = createIndexedDbCollectionWithOptions<MarketAgent>(
-  STORE_NAMES.marketAgents,
-  { lazySync: true },
-);
-const ticketsCollection = createIndexedDbCollectionWithOptions<Ticket>(
-  STORE_NAMES.tickets,
-  { lazySync: true },
-);
-const activityLogsCollection = createIndexedDbCollectionWithOptions<ActivityLog>(
-  STORE_NAMES.activityLogs,
-  { lazySync: true },
-);
-const projectsCollection = createIndexedDbCollectionWithOptions<Project>(
-  STORE_NAMES.projects,
-  { lazySync: true },
-);
-const agentWorkLogsCollection = createIndexedDbCollectionWithOptions<AgentWorkLog>(
-  STORE_NAMES.agentWorkLogs,
-  { lazySync: true },
-);
-// ═══════════════════════════════════════════════════════════════════════════
-// MEMORY-ONLY COLLECTIONS (no IndexedDB persistence)
-// ═══════════════════════════════════════════════════════════════════════════
-// Conversations and messages are stored on the server (server-store.ts).
-// Browser fetches via polling and keeps in memory for reactive UI.
-// NOT persisted to IndexedDB to prevent blocking when workflows run.
-// ═══════════════════════════════════════════════════════════════════════════
-const conversationsCollection = createMemoryOnlyCollection<Conversation>(
-  STORE_NAMES.conversations,
-);
-const conversationMessagesCollection = createMemoryOnlyCollection<ConversationMessage>(
-  STORE_NAMES.conversationMessages,
-);
-const workflowsCollection = createIndexedDbCollectionWithOptions<Workflow>(
-  STORE_NAMES.workflows,
-  { lazySync: true },
-);
-const workflowNodesCollection = createIndexedDbCollectionWithOptions<WorkflowNode>(
-  STORE_NAMES.workflowNodes,
-  { lazySync: true },
-);
-const workflowEdgesCollection = createIndexedDbCollectionWithOptions<WorkflowEdge>(
-  STORE_NAMES.workflowEdges,
-  { lazySync: true },
-);
-const pmRequestsCollection = createIndexedDbCollectionWithOptions<PmRequest>(
-  STORE_NAMES.pmRequests,
-  { lazySync: true },
-);
+const membersCollection = createMemoryOnlyCollection<Member>(STORE_NAMES.members);
+const marketAgentsCollection = createMemoryOnlyCollection<MarketAgent>(STORE_NAMES.marketAgents);
+const ticketsCollection = createMemoryOnlyCollection<Ticket>(STORE_NAMES.tickets);
+const activityLogsCollection = createMemoryOnlyCollection<ActivityLog>(STORE_NAMES.activityLogs);
+const projectsCollection = createMemoryOnlyCollection<Project>(STORE_NAMES.projects);
+const agentWorkLogsCollection = createMemoryOnlyCollection<AgentWorkLog>(STORE_NAMES.agentWorkLogs);
+const conversationsCollection = createMemoryOnlyCollection<Conversation>(STORE_NAMES.conversations);
+const conversationMessagesCollection = createMemoryOnlyCollection<ConversationMessage>(STORE_NAMES.conversationMessages);
+const workflowsCollection = createMemoryOnlyCollection<Workflow>(STORE_NAMES.workflows);
+const workflowNodesCollection = createMemoryOnlyCollection<WorkflowNode>(STORE_NAMES.workflowNodes);
+const workflowEdgesCollection = createMemoryOnlyCollection<WorkflowEdge>(STORE_NAMES.workflowEdges);
+const pmRequestsCollection = createMemoryOnlyCollection<PmRequest>(STORE_NAMES.pmRequests);
 
 let initPromise: Promise<void> | null = null;
 
 /**
- * Load all data from IndexedDB into collections (background loading after init)
- * This runs AFTER the app is shown, so UI is responsive immediately.
+ * Load all data from SERVER into collections (no IndexedDB!)
+ * Server backup is the source of truth.
  */
-async function loadAllCollectionsFromDb(): Promise<void> {
-  dbDebug('bgload', 'Starting background data load...');
+async function loadAllCollectionsFromServer(): Promise<void> {
+  dbDebug('bgload', 'Starting data load from server...');
   const startTime = Date.now();
 
   try {
-    const db = await getIdb();
+    // Get email from localStorage
+    const email = localStorage.getItem(USER_EMAIL_STORAGE_KEY);
+    if (!email) {
+      dbDebug('bgload', 'No email found, skipping server load (new user)');
+      return;
+    }
 
-    // Load each collection from IndexedDB
+    // Fetch backup from server
+    const res = await fetch(`/api/db/restore?email=${encodeURIComponent(email)}`);
+    const data = await res.json();
+
+    if (!data.exists || !data.backup?.stores) {
+      dbDebug('bgload', 'No backup found on server');
+      return;
+    }
+
+    const stores = data.backup.stores;
+
+    // Load each collection from backup
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const loadCollection = async (storeName: string, collection: any) => {
-      try {
-        const rows = await db.getAll(storeName) as Array<{ id: string }>;
-        if (rows.length > 0) {
-          // Insert all rows that don't already exist
-          const existingIds = new Set(Array.from(collection.keys()));
-          const newRows = rows.filter((row) => !existingIds.has(row.id));
-          if (newRows.length > 0) {
-            collection.insert(newRows);
-          }
-          dbDebug('bgload', `[${storeName}] Loaded ${rows.length} rows (${newRows.length} new)`);
+    const loadCollection = (storeName: string, collection: any) => {
+      const rows = stores[storeName] as Array<{ id: string }> | undefined;
+      if (rows && rows.length > 0) {
+        const existingIds = new Set(Array.from(collection.keys()));
+        const newRows = rows.filter((row) => !existingIds.has(row.id));
+        if (newRows.length > 0) {
+          collection.insert(newRows);
         }
-      } catch (error) {
-        dbDebug('bgload', `[${storeName}] Error:`, error);
+        dbDebug('bgload', `[${storeName}] Loaded ${rows.length} rows (${newRows.length} new)`);
       }
     };
 
-    // Load collections in parallel
-    // NOTE: conversations and conversationMessages are MEMORY-ONLY (not persisted to IndexedDB)
-    // They are populated via server polling (syncFromServer)
-    await Promise.all([
-      loadCollection(STORE_NAMES.members, membersCollection),
-      loadCollection(STORE_NAMES.marketAgents, marketAgentsCollection),
-      loadCollection(STORE_NAMES.tickets, ticketsCollection),
-      loadCollection(STORE_NAMES.activityLogs, activityLogsCollection),
-      loadCollection(STORE_NAMES.projects, projectsCollection),
-      loadCollection(STORE_NAMES.agentWorkLogs, agentWorkLogsCollection),
-      // conversations - MEMORY ONLY (server is source of truth)
-      // conversationMessages - MEMORY ONLY (server is source of truth)
-      loadCollection(STORE_NAMES.workflows, workflowsCollection),
-      loadCollection(STORE_NAMES.workflowNodes, workflowNodesCollection),
-      loadCollection(STORE_NAMES.workflowEdges, workflowEdgesCollection),
-      loadCollection(STORE_NAMES.pmRequests, pmRequestsCollection),
-    ]);
+    // Load all collections
+    loadCollection(STORE_NAMES.members, membersCollection);
+    loadCollection(STORE_NAMES.marketAgents, marketAgentsCollection);
+    loadCollection(STORE_NAMES.tickets, ticketsCollection);
+    loadCollection(STORE_NAMES.activityLogs, activityLogsCollection);
+    loadCollection(STORE_NAMES.projects, projectsCollection);
+    loadCollection(STORE_NAMES.agentWorkLogs, agentWorkLogsCollection);
+    // conversations - MEMORY ONLY (server-store.ts is source of truth)
+    // conversationMessages - MEMORY ONLY (server-store.ts is source of truth)
+    loadCollection(STORE_NAMES.workflows, workflowsCollection);
+    loadCollection(STORE_NAMES.workflowNodes, workflowNodesCollection);
+    loadCollection(STORE_NAMES.workflowEdges, workflowEdgesCollection);
+    loadCollection(STORE_NAMES.pmRequests, pmRequestsCollection);
 
     const elapsed = Date.now() - startTime;
-    dbDebug('bgload', `✓ Background load complete (${elapsed}ms)`);
+    dbDebug('bgload', `✓ Server load complete (${elapsed}ms)`);
   } catch (error) {
-    dbDebug('bgload', '❌ Background load failed:', error);
+    dbDebug('bgload', '❌ Server load failed:', error);
   }
 }
 
@@ -1101,10 +1068,10 @@ export function initClientDb(): Promise<void> {
       dbDebug('init:5', '✅ DB marked as initialized');
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 6: Start background data loading (non-blocking)
+      // STEP 6: Start background data loading from SERVER (non-blocking)
       // ─────────────────────────────────────────────────────────────────────
-      // Don't await - let it run in background while UI is shown
-      void loadAllCollectionsFromDb();
+      // No IndexedDB! Load from server backup instead.
+      void loadAllCollectionsFromServer();
 
       // ─────────────────────────────────────────────────────────────────────
       // DONE
@@ -1908,28 +1875,64 @@ export interface UserSettings {
   created_at: string;
 }
 
+const USER_EMAIL_STORAGE_KEY = 'olly-molly-user-email';
+
 export const userSettingsService = {
+  // SYNC: Get email from localStorage (instant, no IndexedDB blocking)
+  getEmailSync(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem(USER_EMAIL_STORAGE_KEY);
+  },
+  // ASYNC: Get email - tries localStorage first, falls back to IndexedDB
+  async getEmail(): Promise<string | null> {
+    // Try localStorage first (instant)
+    const cached = this.getEmailSync();
+    if (cached) return cached;
+
+    // Fallback to IndexedDB (may block)
+    try {
+      const db = await getIdb();
+      const settings = await db.get(STORE_NAMES.meta, 'user_settings') as UserSettings | null;
+      if (settings?.email) {
+        // Cache in localStorage for next time
+        localStorage.setItem(USER_EMAIL_STORAGE_KEY, settings.email);
+        return settings.email;
+      }
+    } catch (error) {
+      console.warn('[userSettings] Failed to get from IndexedDB:', error);
+    }
+    return null;
+  },
   async get(): Promise<UserSettings | null> {
     const db = await getIdb();
     const settings = await db.get(STORE_NAMES.meta, 'user_settings');
     return settings as UserSettings | null;
   },
   async set(email: string): Promise<UserSettings> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Save to localStorage first (instant)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(USER_EMAIL_STORAGE_KEY, normalizedEmail);
+    }
+
+    // Then save to IndexedDB
     const db = await getIdb();
     const settings: UserSettings = {
       id: 'user_settings',
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       created_at: new Date().toISOString(),
     };
     await db.put(STORE_NAMES.meta, settings);
     return settings;
   },
-  async getEmail(): Promise<string | null> {
-    const settings = await this.get();
-    return settings?.email || null;
-  },
   // Clear user settings (logout)
   async clear(): Promise<void> {
+    // Clear localStorage first
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(USER_EMAIL_STORAGE_KEY);
+    }
+    // Then clear IndexedDB
     const db = await getIdb();
     await db.delete(STORE_NAMES.meta, 'user_settings');
   },
