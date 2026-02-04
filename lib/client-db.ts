@@ -816,10 +816,28 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
  * This prevents IndexedDB blocking when workflow is running in another tab.
  */
 function createMemoryOnlyCollection<T extends { id: string }>(collectionId: string) {
-  // Minimal sync config that marks ready immediately (no IndexedDB access)
+  // Store syncParams to confirm operations (required for TanStack DB reactivity)
+  let syncParams: Parameters<SyncConfig<T>['sync']>[0] | null = null;
+
+  const confirmOperationsSync = (mutations: Array<PendingMutation<T>>) => {
+    if (!syncParams) return;
+    const { begin, write, commit } = syncParams;
+    begin();
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'delete') {
+        write({ type: 'delete', key: mutation.key });
+        return;
+      }
+      write({ type: mutation.type, value: mutation.modified });
+    });
+    commit();
+  };
+
   const memoryOnlySync: SyncConfig<T> = {
     sync: (params) => {
-      // Mark ready immediately - no data to load
+      syncParams = params;
+      // Mark ready immediately - no data to load from IndexedDB
+      dbDebug('sync', `[${collectionId}] Memory-only collection - markReady()`);
       params.markReady();
       return () => {}; // cleanup function
     },
@@ -829,7 +847,19 @@ function createMemoryOnlyCollection<T extends { id: string }>(collectionId: stri
     id: collectionId,
     getKey: (item) => item.id,
     sync: memoryOnlySync,
-    // No onInsert/onUpdate/onDelete - changes stay in memory only
+    // Confirm operations for TanStack DB reactivity, but DON'T write to IndexedDB
+    onInsert: async ({ transaction }) => {
+      confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
+      // No IndexedDB write
+    },
+    onUpdate: async ({ transaction }) => {
+      confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
+      // No IndexedDB write
+    },
+    onDelete: async ({ transaction }) => {
+      confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
+      // No IndexedDB write
+    },
   });
 }
 
