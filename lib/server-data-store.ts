@@ -16,7 +16,7 @@
  * - pm_requests.json
  */
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
@@ -30,6 +30,31 @@ async function ensureDataDir(): Promise<void> {
   dataDirCreated = true;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// COLLECTION LOCKS - Prevent race conditions
+// ═══════════════════════════════════════════════════════════════════════════
+const collectionLocks = new Map<string, Promise<void>>();
+
+async function withCollectionLock<T>(collection: string, fn: () => Promise<T>): Promise<T> {
+  // Wait for any existing lock on this collection
+  const existingLock = collectionLocks.get(collection);
+  if (existingLock) {
+    await existingLock;
+  }
+
+  // Create new lock
+  let resolve: () => void;
+  const lock = new Promise<void>((r) => { resolve = r; });
+  collectionLocks.set(collection, lock);
+
+  try {
+    return await fn();
+  } finally {
+    resolve!();
+    collectionLocks.delete(collection);
+  }
+}
+
 // Generic CRUD operations for any collection
 type DataItem = { id: string; [key: string]: unknown };
 
@@ -39,15 +64,40 @@ async function readCollection<T extends DataItem>(name: string): Promise<T[]> {
   try {
     const content = await readFile(filePath, 'utf-8');
     return JSON.parse(content) as T[];
-  } catch {
-    return [];
+  } catch (error) {
+    // Check if file doesn't exist (ENOENT) - this is OK, return empty array
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      console.log(`[data-store] ${name}.json not found, starting fresh`);
+      return [];
+    }
+    // For any other error (JSON parse error, permission error, etc.), log and throw
+    // This prevents data loss from corrupted reads
+    console.error(`[data-store] ❌ CRITICAL: Failed to read ${name}.json:`, error);
+    throw new Error(`Failed to read collection ${name}: ${error}`);
   }
 }
 
 async function writeCollection<T extends DataItem>(name: string, data: T[]): Promise<void> {
   await ensureDataDir();
   const filePath = path.join(DATA_DIR, `${name}.json`);
-  await writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  // Use unique temp file to avoid race conditions
+  const tempPath = `${filePath}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+
+  try {
+    // Write to temp file first (atomic write pattern)
+    const content = JSON.stringify(data, null, 2);
+    await writeFile(tempPath, content, 'utf-8');
+
+    // Rename temp to actual file (atomic on most filesystems)
+    await rename(tempPath, filePath);
+  } catch (error) {
+    console.error(`[data-store] ❌ Failed to write ${name}.json:`, error);
+    // Try to clean up temp file
+    try {
+      await unlink(tempPath);
+    } catch { /* ignore cleanup errors */ }
+    throw error;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -64,20 +114,22 @@ export async function getById<T extends DataItem>(collection: string, id: string
 }
 
 export async function create<T extends DataItem>(collection: string, item: T): Promise<T> {
-  const items = await readCollection<T>(collection);
+  return withCollectionLock(collection, async () => {
+    const items = await readCollection<T>(collection);
 
-  // Check for duplicate ID
-  const existingIndex = items.findIndex(i => i.id === item.id);
-  if (existingIndex >= 0) {
-    // Update existing item instead
-    items[existingIndex] = item;
-  } else {
-    items.push(item);
-  }
+    // Check for duplicate ID
+    const existingIndex = items.findIndex(i => i.id === item.id);
+    if (existingIndex >= 0) {
+      // Update existing item instead
+      items[existingIndex] = item;
+    } else {
+      items.push(item);
+    }
 
-  await writeCollection(collection, items);
-  console.log(`[data-store] ${collection}: created/updated ${item.id}`);
-  return item;
+    await writeCollection(collection, items);
+    console.log(`[data-store] ${collection}: created/updated ${item.id}`);
+    return item;
+  });
 }
 
 export async function update<T extends DataItem>(
@@ -85,73 +137,81 @@ export async function update<T extends DataItem>(
   id: string,
   updates: Partial<T>
 ): Promise<T | null> {
-  const items = await readCollection<T>(collection);
-  const index = items.findIndex(item => item.id === id);
+  return withCollectionLock(collection, async () => {
+    const items = await readCollection<T>(collection);
+    const index = items.findIndex(item => item.id === id);
 
-  if (index < 0) {
-    console.log(`[data-store] ${collection}: item ${id} not found for update`);
-    return null;
-  }
+    if (index < 0) {
+      console.log(`[data-store] ${collection}: item ${id} not found for update`);
+      return null;
+    }
 
-  items[index] = { ...items[index], ...updates };
-  await writeCollection(collection, items);
-  console.log(`[data-store] ${collection}: updated ${id}`);
-  return items[index];
+    items[index] = { ...items[index], ...updates };
+    await writeCollection(collection, items);
+    console.log(`[data-store] ${collection}: updated ${id}`);
+    return items[index];
+  });
 }
 
 export async function remove(collection: string, id: string): Promise<boolean> {
-  const items = await readCollection<DataItem>(collection);
-  const index = items.findIndex(item => item.id === id);
+  return withCollectionLock(collection, async () => {
+    const items = await readCollection<DataItem>(collection);
+    const index = items.findIndex(item => item.id === id);
 
-  if (index < 0) {
-    console.log(`[data-store] ${collection}: item ${id} not found for delete`);
-    return false;
-  }
+    if (index < 0) {
+      console.log(`[data-store] ${collection}: item ${id} not found for delete`);
+      return false;
+    }
 
-  items.splice(index, 1);
-  await writeCollection(collection, items);
-  console.log(`[data-store] ${collection}: deleted ${id}`);
-  return true;
+    items.splice(index, 1);
+    await writeCollection(collection, items);
+    console.log(`[data-store] ${collection}: deleted ${id}`);
+    return true;
+  });
 }
 
 export async function bulkCreate<T extends DataItem>(collection: string, items: T[]): Promise<T[]> {
-  const existing = await readCollection<T>(collection);
-  const existingIds = new Set(existing.map(i => i.id));
+  return withCollectionLock(collection, async () => {
+    const existing = await readCollection<T>(collection);
+    const existingIds = new Set(existing.map(i => i.id));
 
-  const newItems = items.filter(i => !existingIds.has(i.id));
-  const updatedItems = items.filter(i => existingIds.has(i.id));
+    const newItems = items.filter(i => !existingIds.has(i.id));
+    const updatedItems = items.filter(i => existingIds.has(i.id));
 
-  // Update existing items
-  for (const item of updatedItems) {
-    const index = existing.findIndex(i => i.id === item.id);
-    if (index >= 0) {
-      existing[index] = item;
+    // Update existing items
+    for (const item of updatedItems) {
+      const index = existing.findIndex(i => i.id === item.id);
+      if (index >= 0) {
+        existing[index] = item;
+      }
     }
-  }
 
-  // Add new items
-  existing.push(...newItems);
+    // Add new items
+    existing.push(...newItems);
 
-  await writeCollection(collection, existing);
-  console.log(`[data-store] ${collection}: bulk created ${newItems.length} new, updated ${updatedItems.length}`);
-  return items;
+    await writeCollection(collection, existing);
+    console.log(`[data-store] ${collection}: bulk created ${newItems.length} new, updated ${updatedItems.length}`);
+    return items;
+  });
 }
 
 export async function bulkUpdate<T extends DataItem>(
   collection: string,
   updates: Array<{ id: string; data: Partial<T> }>
 ): Promise<void> {
-  const items = await readCollection<T>(collection);
+  return withCollectionLock(collection, async () => {
+    const items = await readCollection<T>(collection);
 
-  for (const { id, data } of updates) {
-    const index = items.findIndex(item => item.id === id);
-    if (index >= 0) {
-      items[index] = { ...items[index], ...data };
+    for (const { id, data } of updates) {
+      const index = items.findIndex(item => item.id === id);
+      if (index >= 0) {
+        items[index] = { ...items[index], ...data };
+      }
     }
-  }
 
-  await writeCollection(collection, items);
-  console.log(`[data-store] ${collection}: bulk updated ${updates.length} items`);
+    await writeCollection(collection, items);
+    console.log(`[data-store] ${collection}: bulk updated ${updates.length} items`);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

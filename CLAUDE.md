@@ -19,24 +19,37 @@ npm run lint     # ESLint
 
 ### Tech Stack
 - **Framework**: Next.js 16 (App Router) with React 19
-- **Database**: TanStack DB with IndexedDB persistence (client-side only)
+- **Database**: Server-side JSON files (`~/.olly-molly/data/`) + memory-only TanStack DB collections
 - **Styling**: Tailwind CSS 4 with CSS variables for theming
 - **Drag & Drop**: dnd-kit
 - **AI Execution**: Spawns CLI processes (claude, opencode, codex)
 
 ### Key Directories
 - `app/` - Next.js App Router pages and API routes
-- `app/api/` - Backend endpoints (agent execution, tickets, projects, members)
+- `app/api/` - Backend endpoints (agent execution, tickets, projects, members, data sync)
 - `components/` - React components organized by feature (kanban/, pm/, project/, team/, ui/)
-- `lib/` - Core logic (client-db.ts for data layer, agent-jobs.ts for AI execution)
+- `lib/` - Core logic
+  - `client-db.ts` - Memory-only TanStack DB collections with server sync
+  - `server-data-store.ts` - Server-side JSON file persistence
+  - `agent-jobs.ts` - AI agent execution
 - `db/` - SQLite schema with default agent definitions
 - `bin/cli.js` - CLI entry point that downloads/runs the app
 
 ### Data Flow
-1. **Primary storage**: IndexedDB via TanStack DB (`lib/client-db.ts`)
-2. **Reactive queries**: `useLiveQuery` hooks for real-time UI updates
-3. **Services**: `memberService`, `ticketService`, `projectService` for CRUD operations
-4. **AI agents**: Spawned as child processes in `lib/agent-jobs.ts`, output streamed to UI
+1. **Server storage**: JSON files at `~/.olly-molly/data/` via `lib/server-data-store.ts`
+2. **Client memory**: TanStack DB collections (memory-only, no IndexedDB)
+3. **Sync pattern**: Fire-and-forget - optimistic local update + async server sync
+4. **Reactive queries**: `useLiveQuery` hooks for real-time UI updates
+5. **Services**: `memberService`, `ticketService`, `projectService` etc. handle CRUD + sync
+6. **AI agents**: Spawned as child processes in `lib/agent-jobs.ts`, output streamed to UI
+
+### Multi-Tab Architecture
+The app uses server-side storage to avoid IndexedDB blocking issues:
+- **Why no IndexedDB**: Continuous writes (e.g., during workflow execution) block `openDB()` in other tabs indefinitely
+- **Server as source of truth**: All data persisted to JSON files on the server
+- **Memory-only collections**: TanStack DB provides reactivity without persistence
+- **Real-time sync**: Mutations sync to server immediately via `/api/data/sync`
+- **User email**: Stored in localStorage for instant retrieval on app startup
 
 ### Core Data Types (lib/client-db.ts)
 - `Member` - Team members with system prompts and capabilities
