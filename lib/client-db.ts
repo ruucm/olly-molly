@@ -545,10 +545,11 @@ function scheduleSqliteDump() {
   if (sqliteDumpTimer) {
     window.clearTimeout(sqliteDumpTimer);
   }
+  // 2 second debounce to prevent frequent writes during rapid updates
   sqliteDumpTimer = window.setTimeout(() => {
     sqliteDumpTimer = null;
     void persistSqliteDump();
-  }, 500);
+  }, 2000);
 }
 
 function sqlEscape(value: string): string {
@@ -662,9 +663,10 @@ async function persistSqliteDump() {
     const projects = Array.from(projectsCollection.values()) as unknown as Project[];
     const agentWorkLogs = Array.from(agentWorkLogsCollection.values()) as unknown as AgentWorkLog[];
     const conversations = Array.from(conversationsCollection.values()) as unknown as Conversation[];
-    const conversationMessages = Array.from(conversationMessagesCollection.values()) as unknown as ConversationMessage[];
+    // NOTE: conversation_messages excluded from SQL dump to reduce size and prevent IndexedDB blocking.
+    // Messages are already stored in IndexedDB separately and don't need SQL backup.
 
-    dbDebug('sqliteDump', `Data counts: members=${members.length}, tickets=${tickets.length}, logs=${activityLogs.length}, convMsgs=${conversationMessages.length}`);
+    dbDebug('sqliteDump', `Data counts: members=${members.length}, tickets=${tickets.length}, logs=${activityLogs.length}, convs=${conversations.length}`);
 
     const chunks: string[] = ['BEGIN;', SQLITE_SCHEMA];
 
@@ -760,13 +762,7 @@ async function persistSqliteDump() {
       'created_at',
     ], conversations);
 
-    insertRows<ConversationMessage>('conversation_messages', [
-      'id',
-      'conversation_id',
-      'content',
-      'message_type',
-      'created_at',
-    ], conversationMessages);
+    // conversation_messages intentionally excluded - too large and causes IndexedDB blocking
 
     chunks.push('COMMIT;');
 
