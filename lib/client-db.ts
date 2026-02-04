@@ -756,7 +756,12 @@ export function useTickets() {
 
 export function useProjects() {
   const { data } = useLiveQuery(() => projectsCollection);
-  return (data ?? []) as Project[];
+  const projects = (data ?? []) as Project[];
+  // 최신순 정렬: active 우선, 그 다음 created_at 내림차순
+  return projects.sort((a, b) => {
+    if (a.is_active !== b.is_active) return b.is_active - a.is_active;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 }
 
 export function useActivityLogs(ticketId: string) {
