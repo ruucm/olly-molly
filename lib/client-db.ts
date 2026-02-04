@@ -160,6 +160,47 @@ export interface PmRequest {
 
 const DB_NAME = 'olly-molly';
 const DB_VERSION = 4;
+const BROADCAST_CHANNEL_NAME = 'olly-molly-sync';
+
+// BroadcastChannel for cross-tab synchronization
+let broadcastChannel: BroadcastChannel | null = null;
+let syncListeners: Array<(storeName: string) => void> = [];
+let isReloadingFromSync = false; // Prevent broadcast loop during reload
+
+function getBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window === 'undefined') return null;
+  if (!broadcastChannel) {
+    try {
+      broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      broadcastChannel.onmessage = (event) => {
+        const { type, storeName } = event.data;
+        if (type === 'sync') {
+          console.log(`[db] Received sync signal for ${storeName} from another tab`);
+          syncListeners.forEach((listener) => listener(storeName));
+        }
+      };
+    } catch (error) {
+      console.warn('[db] BroadcastChannel not supported:', error);
+    }
+  }
+  return broadcastChannel;
+}
+
+function broadcastSync(storeName: string) {
+  // Don't broadcast if we're reloading from another tab's sync
+  if (isReloadingFromSync) return;
+  const channel = getBroadcastChannel();
+  if (channel) {
+    channel.postMessage({ type: 'sync', storeName });
+  }
+}
+
+export function onCrossTabSync(listener: (storeName: string) => void): () => void {
+  syncListeners.push(listener);
+  return () => {
+    syncListeners = syncListeners.filter((l) => l !== listener);
+  };
+}
 
 const STORE_NAMES = {
   members: 'members',
@@ -626,27 +667,31 @@ function createIndexedDbCollection<T extends { id: string }>(storeName: StoreNam
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
+      broadcastSync(storeName);
     },
     onUpdate: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
+      broadcastSync(storeName);
     },
     onDelete: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
+      broadcastSync(storeName);
     },
   });
 }
 
 function createIndexedDbCollectionWithOptions<T extends { id: string }>(
   storeName: StoreName,
-  options?: { scheduleSqliteDump?: boolean },
+  options?: { scheduleSqliteDump?: boolean; broadcastSync?: boolean },
 ) {
   const shouldScheduleSqliteDump = options?.scheduleSqliteDump ?? true;
+  const shouldBroadcastSync = options?.broadcastSync ?? true;
   const sync = createIndexedDbSync<T>(storeName);
   return createCollection<T>({
     id: storeName,
@@ -657,18 +702,21 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
+      if (shouldBroadcastSync) broadcastSync(storeName);
     },
     onUpdate: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
+      if (shouldBroadcastSync) broadcastSync(storeName);
     },
     onDelete: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
+      if (shouldBroadcastSync) broadcastSync(storeName);
     },
   });
 }
@@ -692,11 +740,83 @@ const workflowNodesCollection = createIndexedDbCollection<WorkflowNode>(STORE_NA
 const workflowEdgesCollection = createIndexedDbCollection<WorkflowEdge>(STORE_NAMES.workflowEdges);
 const pmRequestsCollection = createIndexedDbCollection<PmRequest>(STORE_NAMES.pmRequests);
 
+// Map store names to collections for cross-tab sync
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const storeToCollection: Record<string, any> = {
+  [STORE_NAMES.members]: membersCollection,
+  [STORE_NAMES.marketAgents]: marketAgentsCollection,
+  [STORE_NAMES.tickets]: ticketsCollection,
+  [STORE_NAMES.activityLogs]: activityLogsCollection,
+  [STORE_NAMES.projects]: projectsCollection,
+  [STORE_NAMES.agentWorkLogs]: agentWorkLogsCollection,
+  [STORE_NAMES.conversations]: conversationsCollection,
+  [STORE_NAMES.conversationMessages]: conversationMessagesCollection,
+  [STORE_NAMES.workflows]: workflowsCollection,
+  [STORE_NAMES.workflowNodes]: workflowNodesCollection,
+  [STORE_NAMES.workflowEdges]: workflowEdgesCollection,
+  [STORE_NAMES.pmRequests]: pmRequestsCollection,
+};
+
+/**
+ * Reload a collection from IndexedDB (used for cross-tab sync)
+ */
+async function reloadCollectionFromDb(storeName: string): Promise<void> {
+  const collection = storeToCollection[storeName];
+  if (!collection) return;
+
+  // Prevent broadcast loop
+  isReloadingFromSync = true;
+
+  try {
+    const db = await getIdb();
+    const rows = await db.getAll(storeName);
+
+    // Get current keys in memory
+    const currentKeys = new Set(Array.from(collection.keys()));
+    const newKeys = new Set(rows.map((row: { id: string }) => row.id));
+
+    // Delete items that no longer exist
+    currentKeys.forEach((key) => {
+      const keyStr = key as string;
+      if (!newKeys.has(keyStr)) {
+        collection.delete(keyStr);
+      }
+    });
+
+    // Update or insert items from DB
+    rows.forEach((row: { id: string }) => {
+      const existing = collection.get(row.id);
+      if (existing) {
+        // Update if different
+        if (JSON.stringify(existing) !== JSON.stringify(row)) {
+          collection.update(row.id, () => row);
+        }
+      } else {
+        collection.insert(row);
+      }
+    });
+
+    console.log(`[db] Reloaded ${storeName} from IndexedDB (${rows.length} items)`);
+  } catch (error) {
+    console.error(`[db] Failed to reload ${storeName}:`, error);
+  } finally {
+    isReloadingFromSync = false;
+  }
+}
+
 let initPromise: Promise<void> | null = null;
 
 export function initClientDb(): Promise<void> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
+    // Initialize BroadcastChannel for cross-tab sync
+    getBroadcastChannel();
+
+    // Register cross-tab sync listener
+    onCrossTabSync((storeName) => {
+      void reloadCollectionFromDb(storeName);
+    });
+
     // Preload both collections
     await Promise.all([
       membersCollection.preload(),
