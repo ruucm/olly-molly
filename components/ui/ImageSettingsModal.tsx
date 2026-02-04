@@ -18,6 +18,56 @@ export interface ImageGeneratorSettings {
     geminiApiKey?: string;
 }
 
+export interface ScreenshotTestSettings {
+    enabled: boolean;
+}
+
+const SCREENSHOT_STORAGE_KEY = 'screenshotTestSettings';
+
+const defaultScreenshotSettings: ScreenshotTestSettings = {
+    enabled: false, // 기본값: 비활성화
+};
+
+export function getScreenshotTestSettings(): ScreenshotTestSettings {
+    if (typeof window === 'undefined') return defaultScreenshotSettings;
+    try {
+        const stored = localStorage.getItem(SCREENSHOT_STORAGE_KEY);
+        if (stored) {
+            return { ...defaultScreenshotSettings, ...JSON.parse(stored) };
+        }
+    } catch {
+        // Ignore parse errors
+    }
+    return defaultScreenshotSettings;
+}
+
+export async function loadScreenshotTestSettingsFromServer(): Promise<ScreenshotTestSettings> {
+    try {
+        const response = await fetch('/api/settings/screenshot');
+        if (response.ok) {
+            const settings = await response.json();
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(SCREENSHOT_STORAGE_KEY, JSON.stringify(settings));
+            }
+            return { ...defaultScreenshotSettings, ...settings };
+        }
+    } catch {
+        // Fall back to localStorage
+    }
+    return getScreenshotTestSettings();
+}
+
+export async function saveScreenshotTestSettings(settings: ScreenshotTestSettings): Promise<void> {
+    if (typeof window !== 'undefined') {
+        localStorage.setItem(SCREENSHOT_STORAGE_KEY, JSON.stringify(settings));
+    }
+    await fetch('/api/settings/screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+    });
+}
+
 const STORAGE_KEY = 'imageGeneratorSettings';
 
 const defaultSettings: ImageGeneratorSettings = {
@@ -94,9 +144,13 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
     const [userEmail, setUserEmail] = useState<string | null>(null);
     const [loggingOut, setLoggingOut] = useState(false);
 
+    // Screenshot test settings
+    const [screenshotSettings, setScreenshotSettings] = useState<ScreenshotTestSettings>(defaultScreenshotSettings);
+
     useEffect(() => {
         if (isOpen) {
             loadImageSettingsFromServer().then(setSettings);
+            loadScreenshotTestSettingsFromServer().then(setScreenshotSettings);
             setTestStatus('idle');
             setTestMessage('');
 
@@ -138,6 +192,7 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
         setSaving(true);
         try {
             await saveImageSettings(settings);
+            await saveScreenshotTestSettings(screenshotSettings);
             saveNotificationSettings(notificationSettings);
             onClose();
         } catch (error) {
@@ -230,6 +285,29 @@ export function ImageSettingsModal({ isOpen, onClose }: ImageSettingsModalProps)
                 {/* Image Settings Tab */}
                 {activeTab === 'image' && (
                     <>
+                {/* Screenshot Test Settings */}
+                <div className="pb-4 border-b border-[var(--border-primary)]">
+                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-3">
+                        🖼️ 스크린샷 테스트
+                    </label>
+                    <label className="flex items-center gap-3 p-3 border border-[var(--border-primary)] hover:border-[var(--border-accent)] cursor-pointer transition-colors">
+                        <input
+                            type="checkbox"
+                            checked={screenshotSettings.enabled}
+                            onChange={(e) => setScreenshotSettings({ ...screenshotSettings, enabled: e.target.checked })}
+                            className="w-4 h-4"
+                        />
+                        <div>
+                            <div className="text-sm font-medium text-[var(--text-primary)]">스크린샷 테스트 활성화</div>
+                            <div className="text-xs text-[var(--text-muted)]">
+                                {screenshotSettings.enabled
+                                    ? '에이전트가 UI 변경 시 Playwright로 스크린샷을 찍습니다'
+                                    : '에이전트가 스크린샷을 찍지 않습니다 (기본값)'}
+                            </div>
+                        </div>
+                    </label>
+                </div>
+
                 {/* Provider Selection */}
                 <div>
                     <label className="block text-xs font-medium text-[var(--text-secondary)] mb-3">

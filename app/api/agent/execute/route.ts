@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { startBackgroundJob, AgentProvider, getJobByTicketId, getRunningJobs } from '@/lib/agent-jobs';
 import { createConversation, addMessage, logServerStoreState } from '@/lib/server-store';
+import { loadScreenshotSettingsFromFile } from '@/lib/screenshot-settings';
 import { v4 as uuidv4 } from 'uuid';
 
 // Track request count for debugging
@@ -43,7 +44,7 @@ function buildAgentPrompt(ticket: {
 }, project: {
     name: string;
     path: string;
-}, feedback?: string): string {
+}, feedback?: string, globalScreenshotEnabled?: boolean): string {
     // Check if role is QA to add specific port instructions
     const isQA = agent.role === 'QA';
     const qaInstruction = isQA
@@ -70,7 +71,8 @@ If you need images for your implementation (backgrounds, icons, illustrations, e
 - If you get an error about settings not configured, skip image generation`
         : '';
 
-    const canLogScreenshots = agent.can_log_screenshots === 1;
+    // 글로벌 스크린샷 설정이 비활성화면 에이전트 설정과 상관없이 스크린샷 비활성화
+    const canLogScreenshots = globalScreenshotEnabled && agent.can_log_screenshots === 1;
     const screenshotInstruction = canLogScreenshots
         ? `\n\nSCREENSHOT REQUIREMENT:
 If you make any UI/visual changes, you MUST take screenshots to document your work:
@@ -146,6 +148,10 @@ export async function POST(request: NextRequest) {
         const agent = body.agent;
         const project = body.project;
 
+        // Load global screenshot settings
+        const screenshotSettings = loadScreenshotSettingsFromFile();
+        const globalScreenshotEnabled = screenshotSettings.enabled;
+
         // Check for existing running job for this ticket
         const existingJob = getJobByTicketId(ticket.id);
         if (existingJob && existingJob.status === 'running') {
@@ -167,7 +173,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Build prompt
-        const prompt = buildAgentPrompt(ticket, agent, project, body.feedback);
+        const prompt = buildAgentPrompt(ticket, agent, project, body.feedback, globalScreenshotEnabled);
 
         // Use provided provider or default to 'claude'
         const provider: AgentProvider = body.provider || 'claude';
