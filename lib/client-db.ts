@@ -1,6 +1,5 @@
 'use client';
 
-import { openDB, type IDBPDatabase } from 'idb';
 import { v4 as uuidv4 } from 'uuid';
 import {
   createCollection,
@@ -159,8 +158,6 @@ export interface PmRequest {
   created_at: string;
 }
 
-const DB_NAME = 'olly-molly';
-const DB_VERSION = 4;
 const DEBUG_STORAGE_KEY = 'olly-molly-debug';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -222,10 +219,7 @@ if (typeof window !== 'undefined') {
 let isDbInitialized = false;
 let initStartTime = 0;
 
-// NOTE: BroadcastChannel (cross-tab sync) has been removed.
-// Reason: During workflow execution, frequent updates caused IndexedDB contention,
-// blocking new tabs from connecting. Server polling handles data synchronization instead.
-
+// Collection names for TanStack DB (memory-only, no persistence)
 const STORE_NAMES = {
   members: 'members',
   marketAgents: 'market_agents',
@@ -239,581 +233,12 @@ const STORE_NAMES = {
   workflowNodes: 'workflow_nodes',
   workflowEdges: 'workflow_edges',
   pmRequests: 'pm_requests',
-  sqliteDump: 'sqlite_dump',
-  meta: 'meta',
 } as const;
 
-type StoreName = (typeof STORE_NAMES)[keyof typeof STORE_NAMES];
-
-let dbPromise: Promise<IDBPDatabase> | null = null;
-
-const DB_BACKUP_VERSION = 1;
-const AUTO_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
-const BACKUP_STORE_NAMES: StoreName[] = [
-  STORE_NAMES.members,
-  STORE_NAMES.marketAgents,
-  STORE_NAMES.tickets,
-  STORE_NAMES.activityLogs,
-  STORE_NAMES.projects,
-  STORE_NAMES.agentWorkLogs,
-  STORE_NAMES.conversations,
-  STORE_NAMES.conversationMessages,
-  STORE_NAMES.workflows,
-  STORE_NAMES.workflowNodes,
-  STORE_NAMES.workflowEdges,
-  STORE_NAMES.pmRequests,
-  STORE_NAMES.meta,
-];
-
-export type DbBackup = {
-  version: number;
-  exported_at: string;
-  stores: Record<string, unknown[]>;
-};
-
-export async function exportDbBackup(): Promise<DbBackup> {
-  const db = await getIdb();
-  const stores: Record<string, unknown[]> = {};
-  await Promise.all(
-    BACKUP_STORE_NAMES.map(async (storeName) => {
-      stores[storeName] = await db.getAll(storeName);
-    }),
-  );
-  return {
-    version: DB_BACKUP_VERSION,
-    exported_at: new Date().toISOString(),
-    stores,
-  };
-}
-
-export async function importDbBackup(backup: DbBackup): Promise<void> {
-  if (!backup || typeof backup !== 'object') {
-    throw new Error('Invalid backup file.');
-  }
-  if (backup.version !== DB_BACKUP_VERSION) {
-    throw new Error(`Unsupported backup version: ${backup.version}`);
-  }
-
-  const db = await getIdb();
-  const tx = db.transaction(BACKUP_STORE_NAMES, 'readwrite');
-  await Promise.all(
-    BACKUP_STORE_NAMES.map(async (storeName) => {
-      const store = tx.objectStore(storeName);
-      await store.clear();
-      const rows = Array.isArray(backup.stores?.[storeName]) ? backup.stores[storeName] : [];
-      await Promise.all(rows.map((row) => store.put(row)));
-    }),
-  );
-  await tx.done;
-}
-
-let autoBackupTimer: number | null = null;
-
-export function startAutoBackup(): void {
-  if (typeof window === 'undefined') return;
-  if (autoBackupTimer) return;
-
-  const run = async () => {
-    try {
-      const backup = await exportDbBackup();
-      const email = await userSettingsService.getEmail();
-      const payload: Record<string, unknown> = { ...backup };
-      if (email) {
-        payload._email = email;
-      }
-      await fetch('/api/db/backup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (error) {
-      console.warn('[db] Auto backup failed', error);
-    }
-  };
-
-  void run();
-  autoBackupTimer = window.setInterval(run, AUTO_BACKUP_INTERVAL_MS);
-}
-
-function getIdb(): Promise<IDBPDatabase> {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('IndexedDB is only available in the browser.'));
-  }
-  if (!dbPromise) {
-    dbDebug('idb', 'Opening IndexedDB connection...');
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion, newVersion) {
-        dbDebug('idb', `Upgrading DB from v${oldVersion} to v${newVersion}`);
-        if (!db.objectStoreNames.contains(STORE_NAMES.members)) {
-          db.createObjectStore(STORE_NAMES.members, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.marketAgents)) {
-          db.createObjectStore(STORE_NAMES.marketAgents, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.tickets)) {
-          db.createObjectStore(STORE_NAMES.tickets, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.activityLogs)) {
-          db.createObjectStore(STORE_NAMES.activityLogs, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
-          db.createObjectStore(STORE_NAMES.projects, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.agentWorkLogs)) {
-          db.createObjectStore(STORE_NAMES.agentWorkLogs, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.conversations)) {
-          db.createObjectStore(STORE_NAMES.conversations, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.conversationMessages)) {
-          db.createObjectStore(STORE_NAMES.conversationMessages, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.workflows)) {
-          db.createObjectStore(STORE_NAMES.workflows, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.workflowNodes)) {
-          db.createObjectStore(STORE_NAMES.workflowNodes, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.workflowEdges)) {
-          db.createObjectStore(STORE_NAMES.workflowEdges, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.pmRequests)) {
-          db.createObjectStore(STORE_NAMES.pmRequests, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.sqliteDump)) {
-          db.createObjectStore(STORE_NAMES.sqliteDump, { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains(STORE_NAMES.meta)) {
-          db.createObjectStore(STORE_NAMES.meta, { keyPath: 'id' });
-        }
-      },
-      blocked(currentVersion, blockedVersion) {
-        // Another tab has an older version open and won't close
-        dbDebug('idb', `⚠️ BLOCKED! Current: v${currentVersion}, Blocked by: v${blockedVersion}`);
-        console.warn('[db] IndexedDB blocked by another tab. Please close other tabs or refresh them.');
-      },
-      blocking(currentVersion, blockedVersion) {
-        // This tab is blocking another tab from upgrading
-        dbDebug('idb', `⚠️ BLOCKING another tab! Current: v${currentVersion}, Other wants: v${blockedVersion}`);
-        // Close our connection to unblock the other tab
-        dbPromise?.then(db => db.close());
-        dbPromise = null;
-      },
-      terminated() {
-        dbDebug('idb', '❌ Connection terminated unexpectedly');
-        dbPromise = null;
-      },
-    });
-    dbPromise.then(() => {
-      dbDebug('idb', '✓ IndexedDB connection established');
-    }).catch((err) => {
-      dbDebug('idb', '❌ IndexedDB connection failed:', err);
-    });
-  }
-  return dbPromise;
-}
-
-type IndexedDbSync<T extends { id: string }> = SyncConfig<T> & {
-  confirmOperationsSync: (mutations: Array<PendingMutation<T>>) => void;
-};
-
-function createIndexedDbSync<T extends { id: string }>(
-  storeName: StoreName,
-  options?: { lazySync?: boolean },
-): IndexedDbSync<T> {
-  let syncParams: Parameters<SyncConfig<T>['sync']>[0] | null = null;
-  const lazySync = options?.lazySync ?? false;
-
-  const confirmOperationsSync = (mutations: Array<PendingMutation<T>>) => {
-    if (!syncParams) return;
-    const { begin, write, commit } = syncParams;
-    begin();
-    mutations.forEach((mutation) => {
-      if (mutation.type === 'delete') {
-        write({ type: 'delete', key: mutation.key });
-        return;
-      }
-      write({ type: mutation.type, value: mutation.modified });
-    });
-    commit();
-  };
-
-  return {
-    sync: (params) => {
-      syncParams = params;
-      let cancelled = false;
-      dbDebug('sync', `[${storeName}] sync() called${lazySync ? ' (LAZY)' : ''}`);
-
-      // Lazy sync: skip initial data load, just mark ready immediately
-      // Data will be loaded on-demand via syncFromServer
-      if (lazySync) {
-        dbDebug('sync', `[${storeName}] Lazy sync - skipping initial load, markReady()`);
-        params.markReady();
-        return () => { cancelled = true; };
-      }
-
-      void (async () => {
-        try {
-          dbDebug('sync', `[${storeName}] Opening IndexedDB...`);
-          const db = await getIdb();
-          dbDebug('sync', `[${storeName}] IndexedDB opened, fetching rows...`);
-
-          const rows = await db.getAll(storeName);
-          dbDebug('sync', `[${storeName}] Got ${rows.length} rows`);
-
-          if (cancelled) {
-            dbDebug('sync', `[${storeName}] CANCELLED`);
-            return;
-          }
-          if (rows.length === 0) {
-            dbDebug('sync', `[${storeName}] Empty, calling markReady()`);
-            params.markReady();
-            return;
-          }
-          params.begin();
-          rows.forEach((row) => params.write({ type: 'insert', value: row }));
-          params.commit();
-          dbDebug('sync', `[${storeName}] Data written, calling markReady()`);
-          params.markReady();
-        } catch (error) {
-          console.error(`[db] Failed to load ${storeName} from IndexedDB`, error);
-          dbDebug('sync', `[${storeName}] ERROR - calling markReady() anyway`);
-          params.markReady();
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-      };
-    },
-    confirmOperationsSync,
-  };
-}
-
-let sqliteDumpTimer: number | null = null;
-let sqliteDumpEnabled = false; // DISABLED by default - causes IndexedDB blocking with multiple tabs
-
-function scheduleSqliteDump() {
-  // DISABLED: Multiple tabs writing to sqlite_dump simultaneously causes IndexedDB blocking
-  // SQL dump is only needed for data export, not real-time. Use manual backup instead.
-  if (!sqliteDumpEnabled) return;
-
-  if (typeof window === 'undefined') return;
-  if (sqliteDumpTimer) {
-    window.clearTimeout(sqliteDumpTimer);
-  }
-  // 10 second debounce to prevent frequent writes
-  sqliteDumpTimer = window.setTimeout(() => {
-    sqliteDumpTimer = null;
-    void persistSqliteDump();
-  }, 10000);
-}
-
-// Enable/disable sqlite dump (for debugging)
-export function setSqliteDumpEnabled(enabled: boolean): void {
-  sqliteDumpEnabled = enabled;
-  dbDebug('sqliteDump', `SQL dump ${enabled ? 'enabled' : 'disabled'}`);
-}
-
-// Manual trigger for sqlite dump (for backup export)
-export async function triggerSqliteDump(): Promise<void> {
-  await persistSqliteDump();
-}
-
-function sqlEscape(value: string): string {
-  return value.replace(/'/g, "''");
-}
-
-function sqlValue(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL';
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'boolean') return value ? '1' : '0';
-  return `'${sqlEscape(String(value))}'`;
-}
-
-const SQLITE_SCHEMA = `
-CREATE TABLE IF NOT EXISTS members (
-  id TEXT PRIMARY KEY,
-  role TEXT NOT NULL,
-  name TEXT NOT NULL,
-  avatar TEXT,
-  profile_image TEXT,
-  system_prompt TEXT NOT NULL,
-  is_default INTEGER DEFAULT 0,
-  can_generate_images INTEGER DEFAULT 0,
-  can_log_screenshots INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS tickets (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  status TEXT DEFAULT 'TODO' CHECK(status IN ('TODO', 'IN_PROGRESS', 'IN_REVIEW', 'NEED_FIX', 'COMPLETE', 'ON_HOLD')),
-  priority TEXT DEFAULT 'MEDIUM' CHECK(priority IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
-  assignee_id TEXT REFERENCES members(id),
-  project_id TEXT REFERENCES projects(id),
-  created_by TEXT,
-  order_index REAL DEFAULT 0,
-  enable_screenshot INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS activity_logs (
-  id TEXT PRIMARY KEY,
-  ticket_id TEXT REFERENCES tickets(id) ON DELETE CASCADE,
-  member_id TEXT REFERENCES members(id),
-  action TEXT NOT NULL,
-  old_value TEXT,
-  new_value TEXT,
-  details TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  path TEXT NOT NULL UNIQUE,
-  description TEXT,
-  is_active INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS agent_work_logs (
-  id TEXT PRIMARY KEY,
-  ticket_id TEXT REFERENCES tickets(id) ON DELETE CASCADE,
-  agent_id TEXT REFERENCES members(id),
-  project_id TEXT REFERENCES projects(id),
-  command TEXT NOT NULL,
-  prompt TEXT,
-  output TEXT,
-  status TEXT DEFAULT 'RUNNING' CHECK(status IN ('RUNNING', 'SUCCESS', 'FAILED', 'CANCELLED')),
-  git_commit_hash TEXT,
-  started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  completed_at DATETIME,
-  duration_ms INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS conversations (
-  id TEXT PRIMARY KEY,
-  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-  agent_id TEXT NOT NULL REFERENCES members(id),
-  provider TEXT NOT NULL CHECK(provider IN ('claude', 'opencode', 'codex')),
-  prompt TEXT,
-  feedback TEXT,
-  status TEXT DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed', 'cancelled')),
-  git_commit_hash TEXT,
-  started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  completed_at DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS conversation_messages (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  content TEXT NOT NULL,
-  message_type TEXT DEFAULT 'log' CHECK(message_type IN ('log', 'error', 'success', 'system')),
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-`.trim();
-
-async function persistSqliteDump() {
-  const startTime = Date.now();
-  dbDebug('sqliteDump', 'Starting persistSqliteDump...');
-  try {
-    const db = await getIdb();
-    const members = Array.from(membersCollection.values()) as unknown as Member[];
-    const tickets = Array.from(ticketsCollection.values()) as unknown as Ticket[];
-    const activityLogs = Array.from(activityLogsCollection.values()) as unknown as ActivityLog[];
-    const projects = Array.from(projectsCollection.values()) as unknown as Project[];
-    const agentWorkLogs = Array.from(agentWorkLogsCollection.values()) as unknown as AgentWorkLog[];
-    const conversations = Array.from(conversationsCollection.values()) as unknown as Conversation[];
-    // NOTE: conversation_messages excluded from SQL dump to reduce size and prevent IndexedDB blocking.
-    // Messages are already stored in IndexedDB separately and don't need SQL backup.
-
-    dbDebug('sqliteDump', `Data counts: members=${members.length}, tickets=${tickets.length}, logs=${activityLogs.length}, convs=${conversations.length}`);
-
-    const chunks: string[] = ['BEGIN;', SQLITE_SCHEMA];
-
-    const insertRows = <T extends object>(table: string, columns: Array<keyof T>, rows: T[]) => {
-      if (rows.length === 0) return;
-      const columnList = columns.map((col) => String(col)).join(', ');
-      rows.forEach((row) => {
-        const values = columns.map((col) => sqlValue((row as Record<string, unknown>)[String(col)]));
-        chunks.push(`INSERT OR REPLACE INTO ${table} (${columnList}) VALUES (${values.join(', ')});`);
-      });
-    };
-
-    insertRows<Member>('members', [
-      'id',
-      'role',
-      'name',
-      'avatar',
-      'profile_image',
-      'system_prompt',
-      'is_default',
-      'can_generate_images',
-      'can_log_screenshots',
-      'created_at',
-      'updated_at',
-    ], members);
-
-    insertRows<Project>('projects', [
-      'id',
-      'name',
-      'path',
-      'description',
-      'is_active',
-      'created_at',
-      'updated_at',
-    ], projects);
-
-    insertRows<Ticket>('tickets', [
-      'id',
-      'title',
-      'description',
-      'status',
-      'priority',
-      'assignee_ids',
-      'project_id',
-      'created_by',
-      'order_index',
-      'enable_screenshot',
-      'created_at',
-      'updated_at',
-    ], tickets.map(t => ({
-      ...t,
-      assignee_ids: JSON.stringify(t.assignee_ids || []),
-      enable_screenshot: t.enable_screenshot ?? 0,
-    } as any)));
-
-    insertRows<ActivityLog>('activity_logs', [
-      'id',
-      'ticket_id',
-      'member_id',
-      'action',
-      'old_value',
-      'new_value',
-      'details',
-      'created_at',
-    ], activityLogs);
-
-    insertRows<AgentWorkLog>('agent_work_logs', [
-      'id',
-      'ticket_id',
-      'agent_id',
-      'project_id',
-      'command',
-      'prompt',
-      'output',
-      'status',
-      'git_commit_hash',
-      'started_at',
-      'completed_at',
-      'duration_ms',
-    ], agentWorkLogs);
-
-    insertRows<Conversation>('conversations', [
-      'id',
-      'ticket_id',
-      'agent_id',
-      'provider',
-      'prompt',
-      'feedback',
-      'status',
-      'git_commit_hash',
-      'started_at',
-      'completed_at',
-      'created_at',
-    ], conversations);
-
-    // conversation_messages intentionally excluded - too large and causes IndexedDB blocking
-
-    chunks.push('COMMIT;');
-
-    const sqlSize = chunks.join('\n').length;
-    dbDebug('sqliteDump', `SQL size: ${(sqlSize / 1024).toFixed(1)}KB, writing to IndexedDB...`);
-
-    await db.put(STORE_NAMES.sqliteDump, {
-      id: 'main',
-      sql: chunks.join('\n'),
-      updated_at: new Date().toISOString(),
-    });
-
-    const elapsed = Date.now() - startTime;
-    dbDebug('sqliteDump', `✓ Completed in ${elapsed}ms`);
-  } catch (error) {
-    const elapsed = Date.now() - startTime;
-    dbDebug('sqliteDump', `❌ Failed after ${elapsed}ms:`, error);
-  }
-}
-
-function createIndexedDbCollection<T extends { id: string }>(storeName: StoreName) {
-  const sync = createIndexedDbSync<T>(storeName);
-  return createCollection<T>({
-    id: storeName,
-    getKey: (item) => item.id,
-    sync,
-    onInsert: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
-      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      scheduleSqliteDump();
-    },
-    onUpdate: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
-      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      scheduleSqliteDump();
-    },
-    onDelete: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
-      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      scheduleSqliteDump();
-    },
-  });
-}
-
-function createIndexedDbCollectionWithOptions<T extends { id: string }>(
-  storeName: StoreName,
-  options?: { scheduleSqliteDump?: boolean; lazySync?: boolean },
-) {
-  const shouldScheduleSqliteDump = options?.scheduleSqliteDump ?? true;
-  const lazySync = options?.lazySync ?? false;
-  const sync = createIndexedDbSync<T>(storeName, { lazySync });
-  return createCollection<T>({
-    id: storeName,
-    getKey: (item) => item.id,
-    sync,
-    onInsert: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
-      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      if (shouldScheduleSqliteDump) scheduleSqliteDump();
-    },
-    onUpdate: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
-      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      if (shouldScheduleSqliteDump) scheduleSqliteDump();
-    },
-    onDelete: async ({ transaction }) => {
-      const db = await getIdb();
-      await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
-      sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      if (shouldScheduleSqliteDump) scheduleSqliteDump();
-    },
-  });
-}
-
 /**
- * Create a MEMORY-ONLY collection (no IndexedDB persistence).
- * Used for data that is already persisted on the server (conversations, messages).
- * This prevents IndexedDB blocking when workflow is running in another tab.
+ * Create a MEMORY-ONLY collection.
+ * All data is persisted on the server (JSON files at ~/.olly-molly/data/).
+ * Browser keeps data in memory only for reactive UI updates.
  */
 function createMemoryOnlyCollection<T extends { id: string }>(collectionId: string) {
   // Store syncParams to confirm operations (required for TanStack DB reactivity)
@@ -836,7 +261,7 @@ function createMemoryOnlyCollection<T extends { id: string }>(collectionId: stri
   const memoryOnlySync: SyncConfig<T> = {
     sync: (params) => {
       syncParams = params;
-      // Mark ready immediately - no data to load from IndexedDB
+      // Mark ready immediately - data loaded from server
       dbDebug('sync', `[${collectionId}] Memory-only collection - markReady()`);
       params.markReady();
       return () => {}; // cleanup function
@@ -847,30 +272,25 @@ function createMemoryOnlyCollection<T extends { id: string }>(collectionId: stri
     id: collectionId,
     getKey: (item) => item.id,
     sync: memoryOnlySync,
-    // Confirm operations for TanStack DB reactivity, but DON'T write to IndexedDB
+    // Confirm operations for TanStack DB reactivity
     onInsert: async ({ transaction }) => {
       confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      // No IndexedDB write
     },
     onUpdate: async ({ transaction }) => {
       confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      // No IndexedDB write
     },
     onDelete: async ({ transaction }) => {
       confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
-      // No IndexedDB write
     },
   });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ALL COLLECTIONS ARE MEMORY-ONLY (no IndexedDB persistence)
+// ALL COLLECTIONS ARE MEMORY-ONLY
 // ═══════════════════════════════════════════════════════════════════════════
-// IndexedDB has severe multi-tab blocking issues. When one tab is writing,
-// other tabs can be blocked indefinitely from connecting.
-//
-// Solution: All data is stored on the server. Browser keeps data in memory
-// for reactive UI (useLiveQuery), and syncs with server via API.
+// All data is stored on the server (JSON files at ~/.olly-molly/data/).
+// Browser keeps data in memory for reactive UI (useLiveQuery), and syncs
+// with server via /api/data/sync endpoint.
 // ═══════════════════════════════════════════════════════════════════════════
 const membersCollection = createMemoryOnlyCollection<Member>(STORE_NAMES.members);
 const marketAgentsCollection = createMemoryOnlyCollection<MarketAgent>(STORE_NAMES.marketAgents);
@@ -888,8 +308,8 @@ const pmRequestsCollection = createMemoryOnlyCollection<PmRequest>(STORE_NAMES.p
 let initPromise: Promise<void> | null = null;
 
 /**
- * Load all data from SERVER into collections (no IndexedDB!)
- * Server JSON files are the source of truth.
+ * Load all data from server into memory collections.
+ * Server JSON files at ~/.olly-molly/data/ are the source of truth.
  */
 async function loadAllCollectionsFromServer(): Promise<void> {
   dbDebug('bgload', 'Starting data load from server...');
@@ -1092,23 +512,14 @@ export function initClientDb(): Promise<void> {
       }
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 4: Background tasks
-      // ─────────────────────────────────────────────────────────────────────
-      dbDebug('init:4', 'Scheduling background tasks...');
-      scheduleSqliteDump();
-      startAutoBackup();
-      dbDebug('init:4', '✓ Background tasks scheduled');
-
-      // ─────────────────────────────────────────────────────────────────────
-      // STEP 5: Mark as initialized
+      // STEP 4: Mark as initialized
       // ─────────────────────────────────────────────────────────────────────
       isDbInitialized = true;
-      dbDebug('init:5', '✅ DB marked as initialized');
+      dbDebug('init:4', '✅ DB marked as initialized');
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 6: Start background data loading from SERVER (non-blocking)
+      // STEP 5: Load data from server (non-blocking)
       // ─────────────────────────────────────────────────────────────────────
-      // No IndexedDB! Load from server backup instead.
       void loadAllCollectionsFromServer();
 
       // ─────────────────────────────────────────────────────────────────────
@@ -1576,11 +987,11 @@ export const projectService = {
 };
 
 /**
- * Sync server-side execution data into IndexedDB (ComfyUI pattern).
- * Server is source of truth; IndexedDB is just a reactive UI cache.
+ * Sync server-side execution data into memory collections.
+ * Server is source of truth; memory collections are for reactive UI.
  */
 export const syncFromServer = {
-  /** Upsert a conversation from server into IndexedDB */
+  /** Upsert a conversation from server into memory */
   upsertConversation(data: Conversation): void {
     const existing = conversationsCollection.get(data.id);
     if (existing) {
@@ -1601,7 +1012,7 @@ export const syncFromServer = {
     }
   },
 
-  /** Upsert a message from server into IndexedDB (skip if already exists) */
+  /** Upsert a message from server into memory (skip if already exists) */
   upsertMessage(data: ConversationMessage): void {
     const existing = conversationMessagesCollection.get(data.id);
     if (!existing) {
@@ -1953,7 +1364,7 @@ export const collections = {
   pmRequestsCollection,
 };
 
-// User Settings (stored in meta store)
+// User Settings (stored in localStorage only)
 export interface UserSettings {
   id: string;
   email: string;
@@ -1963,63 +1374,42 @@ export interface UserSettings {
 const USER_EMAIL_STORAGE_KEY = 'olly-molly-user-email';
 
 export const userSettingsService = {
-  // SYNC: Get email from localStorage (instant, no IndexedDB blocking)
+  // Get email synchronously from localStorage
   getEmailSync(): string | null {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem(USER_EMAIL_STORAGE_KEY);
   },
-  // ASYNC: Get email - tries localStorage first, falls back to IndexedDB
+  // Get email (async for API compatibility, but uses localStorage)
   async getEmail(): Promise<string | null> {
-    // Try localStorage first (instant)
-    const cached = this.getEmailSync();
-    if (cached) return cached;
-
-    // Fallback to IndexedDB (may block)
-    try {
-      const db = await getIdb();
-      const settings = await db.get(STORE_NAMES.meta, 'user_settings') as UserSettings | null;
-      if (settings?.email) {
-        // Cache in localStorage for next time
-        localStorage.setItem(USER_EMAIL_STORAGE_KEY, settings.email);
-        return settings.email;
-      }
-    } catch (error) {
-      console.warn('[userSettings] Failed to get from IndexedDB:', error);
-    }
-    return null;
+    return this.getEmailSync();
   },
+  // Get full settings
   async get(): Promise<UserSettings | null> {
-    const db = await getIdb();
-    const settings = await db.get(STORE_NAMES.meta, 'user_settings');
-    return settings as UserSettings | null;
+    const email = this.getEmailSync();
+    if (!email) return null;
+    return {
+      id: 'user_settings',
+      email,
+      created_at: new Date().toISOString(),
+    };
   },
+  // Set email
   async set(email: string): Promise<UserSettings> {
     const normalizedEmail = email.trim().toLowerCase();
-
-    // Save to localStorage first (instant)
     if (typeof window !== 'undefined') {
       localStorage.setItem(USER_EMAIL_STORAGE_KEY, normalizedEmail);
     }
-
-    // Then save to IndexedDB
-    const db = await getIdb();
-    const settings: UserSettings = {
+    return {
       id: 'user_settings',
       email: normalizedEmail,
       created_at: new Date().toISOString(),
     };
-    await db.put(STORE_NAMES.meta, settings);
-    return settings;
   },
   // Clear user settings (logout)
   async clear(): Promise<void> {
-    // Clear localStorage first
     if (typeof window !== 'undefined') {
       localStorage.removeItem(USER_EMAIL_STORAGE_KEY);
     }
-    // Then clear IndexedDB
-    const db = await getIdb();
-    await db.delete(STORE_NAMES.meta, 'user_settings');
   },
   // Convert email to safe directory name
   emailToDir(email: string): string {

@@ -3,8 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { userSettingsService, importDbBackup } from '@/lib/client-db';
-import type { DbBackup } from '@/lib/client-db';
+import { userSettingsService } from '@/lib/client-db';
 
 interface EmailSetupProps {
     onComplete: (email: string) => void;
@@ -35,22 +34,6 @@ export function EmailSetup({ onComplete }: EmailSetupProps) {
         try {
             const normalizedEmail = email.trim().toLowerCase();
             await userSettingsService.set(normalizedEmail);
-
-            // Check for existing backup for this email
-            try {
-                const res = await fetch(`/api/db/restore?email=${encodeURIComponent(normalizedEmail)}`);
-                const data = await res.json();
-                if (data.exists && data.backup) {
-                    await importDbBackup(data.backup as DbBackup);
-                    // Re-save email since importDbBackup clears the meta store
-                    await userSettingsService.set(normalizedEmail);
-                    window.location.reload();
-                    return;
-                }
-            } catch (restoreErr) {
-                console.warn('[onboarding] Failed to check/restore backup, continuing fresh', restoreErr);
-            }
-
             onComplete(normalizedEmail);
         } catch (err) {
             setError('저장 중 오류가 발생했습니다');

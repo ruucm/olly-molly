@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
-import { projectService, useProjects, userSettingsService, type Project, exportDbBackup, importDbBackup } from '@/lib/client-db';
+import { projectService, useProjects, userSettingsService, type Project } from '@/lib/client-db';
 
 function formatRelativeTime(dateString: string): string {
     const date = new Date(dateString);
@@ -111,7 +111,16 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         setBackupStatus('working');
         setBackupMessage('');
         try {
-            const backup = await exportDbBackup();
+            // Fetch all data from server (source of truth)
+            const res = await fetch('/api/data/sync');
+            if (!res.ok) throw new Error('Failed to fetch data from server');
+            const serverData = await res.json();
+
+            const backup = {
+                version: 1,
+                exported_at: new Date().toISOString(),
+                data: serverData.data,
+            };
             const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const timestamp = new Date()
@@ -151,7 +160,20 @@ export function ProjectSelector({ onProjectChange }: ProjectSelectorProps) {
         try {
             const text = await file.text();
             const parsed = JSON.parse(text);
-            await importDbBackup(parsed);
+
+            // Restore by bulk creating data on server
+            const collections = ['members', 'market_agents', 'tickets', 'activity_logs', 'projects', 'workflows', 'workflow_nodes', 'workflow_edges', 'pm_requests'];
+            for (const collection of collections) {
+                const data = parsed.data?.[collection] || parsed.stores?.[collection];
+                if (data && Array.isArray(data) && data.length > 0) {
+                    await fetch('/api/data/sync', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'bulkCreate', collection, data }),
+                    });
+                }
+            }
+
             setRestoreStatus('success');
             setRestoreMessage('복원이 완료되었습니다. 새로고침 후 적용됩니다.');
             window.setTimeout(() => window.location.reload(), 800);
