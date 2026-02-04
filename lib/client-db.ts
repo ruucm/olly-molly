@@ -161,7 +161,6 @@ export interface PmRequest {
 
 const DB_NAME = 'olly-molly';
 const DB_VERSION = 4;
-const BROADCAST_CHANNEL_NAME = 'olly-molly-sync';
 const DEBUG_STORAGE_KEY = 'olly-molly-debug';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -223,69 +222,9 @@ if (typeof window !== 'undefined') {
 let isDbInitialized = false;
 let initStartTime = 0;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// BROADCAST CHANNEL - Completely independent from initialization
-// ═══════════════════════════════════════════════════════════════════════════
-let broadcastChannel: BroadcastChannel | null = null;
-let syncListeners: Array<(storeName: string) => void> = [];
-let isReloadingFromSync = false;
-let isBroadcastEnabled = false; // Only enable after init completes
-
-const BROADCAST_DEBOUNCE_MS = 300;
-const pendingBroadcasts = new Map<string, number>();
-
-function setupBroadcastChannel(): void {
-  if (typeof window === 'undefined') return;
-  if (broadcastChannel) return;
-
-  try {
-    broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-    broadcastChannel.onmessage = (event) => {
-      // CRITICAL: Ignore ALL messages until DB is fully initialized
-      if (!isDbInitialized) {
-        dbDebug('broadcast', 'IGNORED sync message (DB not ready)', event.data);
-        return;
-      }
-
-      const { type, storeName } = event.data;
-      if (type === 'sync') {
-        dbDebug('broadcast', `Received sync for ${storeName}`);
-        syncListeners.forEach((listener) => listener(storeName));
-      }
-    };
-    dbDebug('broadcast', 'BroadcastChannel created');
-  } catch (error) {
-    console.warn('[db] BroadcastChannel not supported:', error);
-  }
-}
-
-function broadcastSync(storeName: string) {
-  // Don't broadcast until explicitly enabled
-  if (!isBroadcastEnabled) return;
-  if (isReloadingFromSync) return;
-
-  // Debounce
-  const existingTimeout = pendingBroadcasts.get(storeName);
-  if (existingTimeout) {
-    clearTimeout(existingTimeout);
-  }
-
-  const timeoutId = window.setTimeout(() => {
-    pendingBroadcasts.delete(storeName);
-    if (broadcastChannel) {
-      broadcastChannel.postMessage({ type: 'sync', storeName });
-    }
-  }, BROADCAST_DEBOUNCE_MS);
-
-  pendingBroadcasts.set(storeName, timeoutId);
-}
-
-export function onCrossTabSync(listener: (storeName: string) => void): () => void {
-  syncListeners.push(listener);
-  return () => {
-    syncListeners = syncListeners.filter((l) => l !== listener);
-  };
-}
+// NOTE: BroadcastChannel (cross-tab sync) has been removed.
+// Reason: During workflow execution, frequent updates caused IndexedDB contention,
+// blocking new tabs from connecting. Server polling handles data synchronization instead.
 
 const STORE_NAMES = {
   members: 'members',
@@ -823,31 +762,27 @@ function createIndexedDbCollection<T extends { id: string }>(storeName: StoreNam
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
-      broadcastSync(storeName);
     },
     onUpdate: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
-      broadcastSync(storeName);
     },
     onDelete: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       scheduleSqliteDump();
-      broadcastSync(storeName);
     },
   });
 }
 
 function createIndexedDbCollectionWithOptions<T extends { id: string }>(
   storeName: StoreName,
-  options?: { scheduleSqliteDump?: boolean; broadcastSync?: boolean; lazySync?: boolean },
+  options?: { scheduleSqliteDump?: boolean; lazySync?: boolean },
 ) {
   const shouldScheduleSqliteDump = options?.scheduleSqliteDump ?? true;
-  const shouldBroadcastSync = options?.broadcastSync ?? true;
   const lazySync = options?.lazySync ?? false;
   const sync = createIndexedDbSync<T>(storeName, { lazySync });
   return createCollection<T>({
@@ -859,21 +794,18 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
-      if (shouldBroadcastSync) broadcastSync(storeName);
     },
     onUpdate: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.put(storeName, mutation.modified)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
-      if (shouldBroadcastSync) broadcastSync(storeName);
     },
     onDelete: async ({ transaction }) => {
       const db = await getIdb();
       await Promise.all(transaction.mutations.map((mutation) => db.delete(storeName, mutation.key as string)));
       sync.confirmOperationsSync(transaction.mutations as Array<PendingMutation<T>>);
       if (shouldScheduleSqliteDump) scheduleSqliteDump();
-      if (shouldBroadcastSync) broadcastSync(storeName);
     },
   });
 }
@@ -881,108 +813,22 @@ function createIndexedDbCollectionWithOptions<T extends { id: string }>(
 const membersCollection = createIndexedDbCollection<Member>(STORE_NAMES.members);
 const marketAgentsCollection = createIndexedDbCollection<MarketAgent>(STORE_NAMES.marketAgents);
 const ticketsCollection = createIndexedDbCollection<Ticket>(STORE_NAMES.tickets);
-// Activity logs can accumulate during ticket operations; disable broadcast to reduce noise
-const activityLogsCollection = createIndexedDbCollectionWithOptions<ActivityLog>(
-  STORE_NAMES.activityLogs,
-  { broadcastSync: false },
-);
+const activityLogsCollection = createIndexedDbCollection<ActivityLog>(STORE_NAMES.activityLogs);
 const projectsCollection = createIndexedDbCollection<Project>(STORE_NAMES.projects);
 const agentWorkLogsCollection = createIndexedDbCollection<AgentWorkLog>(STORE_NAMES.agentWorkLogs);
 const conversationsCollection = createIndexedDbCollection<Conversation>(STORE_NAMES.conversations);
 // Conversation messages can grow rapidly (6000+ messages).
 // - scheduleSqliteDump: false - don't rebuild SQL dump on every message
-// - broadcastSync: false - don't broadcast every message to other tabs
 // - lazySync: true - DON'T load all messages on startup (causes IndexedDB blocking!)
 //   Messages are loaded on-demand via syncFromServer when viewing a ticket.
 const conversationMessagesCollection = createIndexedDbCollectionWithOptions<ConversationMessage>(
   STORE_NAMES.conversationMessages,
-  { scheduleSqliteDump: false, broadcastSync: false, lazySync: true },
+  { scheduleSqliteDump: false, lazySync: true },
 );
 const workflowsCollection = createIndexedDbCollection<Workflow>(STORE_NAMES.workflows);
 const workflowNodesCollection = createIndexedDbCollection<WorkflowNode>(STORE_NAMES.workflowNodes);
 const workflowEdgesCollection = createIndexedDbCollection<WorkflowEdge>(STORE_NAMES.workflowEdges);
 const pmRequestsCollection = createIndexedDbCollection<PmRequest>(STORE_NAMES.pmRequests);
-
-// Map store names to collections for cross-tab sync
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const storeToCollection: Record<string, any> = {
-  [STORE_NAMES.members]: membersCollection,
-  [STORE_NAMES.marketAgents]: marketAgentsCollection,
-  [STORE_NAMES.tickets]: ticketsCollection,
-  [STORE_NAMES.activityLogs]: activityLogsCollection,
-  [STORE_NAMES.projects]: projectsCollection,
-  [STORE_NAMES.agentWorkLogs]: agentWorkLogsCollection,
-  [STORE_NAMES.conversations]: conversationsCollection,
-  [STORE_NAMES.conversationMessages]: conversationMessagesCollection,
-  [STORE_NAMES.workflows]: workflowsCollection,
-  [STORE_NAMES.workflowNodes]: workflowNodesCollection,
-  [STORE_NAMES.workflowEdges]: workflowEdgesCollection,
-  [STORE_NAMES.pmRequests]: pmRequestsCollection,
-};
-
-/**
- * Reload a collection from IndexedDB (used for cross-tab sync)
- */
-async function reloadCollectionFromDb(storeName: string): Promise<void> {
-  // Skip if DB not yet initialized (prevents conflict during init)
-  if (!isDbInitialized) {
-    dbDebug('reload', `SKIP ${storeName} - DB not initialized`);
-    return;
-  }
-
-  const collection = storeToCollection[storeName];
-  if (!collection) {
-    dbDebug('reload', `SKIP ${storeName} - collection not found`);
-    return;
-  }
-
-  // Prevent broadcast loop
-  isReloadingFromSync = true;
-
-  try {
-    const db = await getIdb();
-    const rows = await db.getAll(storeName);
-
-    // Get current keys in memory
-    const currentKeys = new Set(Array.from(collection.keys()));
-    const newKeys = new Set(rows.map((row: { id: string }) => row.id));
-
-    let changeCount = 0;
-
-    // Delete items that no longer exist
-    currentKeys.forEach((key) => {
-      const keyStr = key as string;
-      if (!newKeys.has(keyStr)) {
-        collection.delete(keyStr);
-        changeCount++;
-      }
-    });
-
-    // Update or insert items from DB
-    rows.forEach((row: { id: string }) => {
-      const existing = collection.get(row.id);
-      if (existing) {
-        // Update if different
-        if (JSON.stringify(existing) !== JSON.stringify(row)) {
-          collection.update(row.id, () => row);
-          changeCount++;
-        }
-      } else {
-        collection.insert(row);
-        changeCount++;
-      }
-    });
-
-    // Only log when there are actual changes
-    if (changeCount > 0) {
-      dbDebug('reload', `${storeName}: ${changeCount} changes applied`);
-    }
-  } catch (error) {
-    dbDebug('reload', `ERROR ${storeName}:`, error);
-  } finally {
-    isReloadingFromSync = false;
-  }
-}
 
 let initPromise: Promise<void> | null = null;
 
@@ -1013,10 +859,6 @@ let initPromise: Promise<void> | null = null;
 // │  [STEP 5] Mark as initialized                                          │
 // │     │     Log: "[init:5] ✅ DB initialized"                            │
 // │     │     isDbInitialized = true                                       │
-// │     ▼                                                                   │
-// │  [STEP 6] Setup BroadcastChannel (LAZY, after init)                    │
-// │     │     Log: "[init:6] Setting up cross-tab sync..."                 │
-// │     │     isBroadcastEnabled = true                                    │
 // │     ▼                                                                   │
 // │  [DONE] Promise resolves                                               │
 // │         Log: "[init:done] Initialization complete (XXXms)"             │
@@ -1121,17 +963,6 @@ export function initClientDb(): Promise<void> {
       // ─────────────────────────────────────────────────────────────────────
       isDbInitialized = true;
       dbDebug('init:5', '✅ DB marked as initialized');
-
-      // ─────────────────────────────────────────────────────────────────────
-      // STEP 6: Setup BroadcastChannel (AFTER init complete)
-      // ─────────────────────────────────────────────────────────────────────
-      dbDebug('init:6', 'Setting up cross-tab sync...');
-      setupBroadcastChannel();
-      onCrossTabSync((storeName) => {
-        void reloadCollectionFromDb(storeName);
-      });
-      isBroadcastEnabled = true;
-      dbDebug('init:6', '✓ Cross-tab sync enabled');
 
       // ─────────────────────────────────────────────────────────────────────
       // DONE
