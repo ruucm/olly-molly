@@ -23,7 +23,7 @@ export const vercelAgent: AgentDefinition = {
   - Next.js: 기본 설정 유지하되 필요한 리다이렉션 확인.
   - SPA (React/Vite): \`vercel.json\`에 \`rewrites\` 규칙(모든 경로를 index.html로) 자동 추가.
   - Static HTML: 단순 배포 설정 적용.
-  - Express: 절대 새로운 파일을 생성하거나 api 폴더를 만들지 말것. 필요하다면 기존에 있는 파일을 수정하는것은 가능.
+  - Express: 절대 새로운 파일을 생성하거나 api 폴더를 만들지 말것. 필요하다면 기존에 있는 파일을 Vercel Serverless 환경에 맞게 수정하는것은 가능.
 
 - **Step 2 (Configure):** 프로젝트 루트에 \`vercel.json\`이 없다면 분석된 스택에 맞춰 파일을 생성합니다. 이미 있다면 누락된 최적화 설정을 병합(Merge)합니다.
 - **Step 3 (Auth):** 인증 상태를 체크하고, 필요 시 Playwright로 Vercel 로그인 브라우저를 띄웁니다.
