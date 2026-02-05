@@ -34,6 +34,7 @@ import type { AgentCategory } from '@/agents';
 import { EmailSetup } from '@/components/onboarding/EmailSetup';
 import { CLIWarningModal } from '@/components/ui/CLIWarningModal';
 import { ImageSettingsModal } from '@/components/ui/ImageSettingsModal';
+import { DirectCLIModal } from '@/components/direct-cli';
 
 interface RunningJob {
   id: string;
@@ -78,6 +79,7 @@ export default function Dashboard() {
   const [cliWarningModalOpen, setCliWarningModalOpen] = useState(false);
   const [imageSettingsModalOpen, setImageSettingsModalOpen] = useState(false);
   const [marketModalOpen, setMarketModalOpen] = useState(false);
+  const [directCliModalOpen, setDirectCliModalOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([]);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [emailChecked, setEmailChecked] = useState(false);
@@ -445,6 +447,12 @@ export default function Dashboard() {
             <FolderOpen className="w-5 h-5" /> 파일 탐색
           </button>
           <button
+            onClick={() => { setDirectCliModalOpen(true); setMobileMenuOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+          >
+            ⌨️ CLI
+          </button>
+          <button
             onClick={() => { setPmModalOpen(true); setMobileMenuOpen(false); }}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
           >
@@ -539,6 +547,13 @@ export default function Dashboard() {
               onClick={() => setArtifactsModalOpen(true)}
             >
               파일 탐색
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDirectCliModalOpen(true)}
+            >
+              ⌨️ CLI
             </Button>
             <Button
               variant="ghost"
@@ -820,6 +835,13 @@ export default function Dashboard() {
         onAddToTeam={handleAddFromMarket}
         onCreateMarketAgent={handleCreateMarketAgent}
         onDeleteMarketAgent={handleDeleteMarketAgent}
+      />
+
+      {/* Direct CLI Modal */}
+      <DirectCLIModal
+        isOpen={directCliModalOpen}
+        onClose={() => setDirectCliModalOpen(false)}
+        defaultProjectPath={activeProject?.path}
       />
     </div>
   );

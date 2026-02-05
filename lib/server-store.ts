@@ -314,5 +314,124 @@ export function recoverOrphanedConversations(): number {
             count++;
         }
     }
+    // Also recover orphaned DirectCLI conversations
+    for (const conv of directCliConversations.values()) {
+        if (conv.status === 'running') {
+            conv.status = 'failed';
+            conv.completed_at = new Date().toISOString();
+            addDirectCliMessage(conv.id, '⚠️ Server restarted during execution', 'system');
+            count++;
+        }
+    }
     return count;
+}
+
+// ─── DirectCLI Types ─────────────────────────────────────────────────
+
+export interface DirectCliConversation {
+    id: string;
+    project_path: string;
+    provider: 'claude' | 'opencode' | 'codex';
+    prompt: string;
+    status: 'running' | 'completed' | 'failed' | 'cancelled';
+    started_at: string;
+    completed_at: string | null;
+}
+
+export interface DirectCliMessage {
+    id: string;
+    conversation_id: string;
+    content: string;
+    message_type: 'log' | 'error' | 'success' | 'system';
+    created_at: string;
+}
+
+// ─── DirectCLI In-Memory Store ───────────────────────────────────────
+
+/** DirectCLI conversations keyed by id */
+const directCliConversations = new Map<string, DirectCliConversation>();
+
+/** DirectCLI messages keyed by conversation_id -> messages array */
+const directCliMessagesByConversation = new Map<string, DirectCliMessage[]>();
+
+// ─── DirectCLI CRUD ──────────────────────────────────────────────────
+
+export function createDirectCliConversation(data: {
+    id?: string;
+    project_path: string;
+    provider: 'claude' | 'opencode' | 'codex';
+    prompt: string;
+}): DirectCliConversation {
+    const now = new Date().toISOString();
+    const conversation: DirectCliConversation = {
+        id: data.id || uuidv4(),
+        project_path: data.project_path,
+        provider: data.provider,
+        prompt: data.prompt,
+        status: 'running',
+        started_at: now,
+        completed_at: null,
+    };
+    directCliConversations.set(conversation.id, conversation);
+    directCliMessagesByConversation.set(conversation.id, []);
+    console.log(`[server-store] DirectCLI conversation created: ${conversation.id.slice(0, 8)}`);
+    return conversation;
+}
+
+export function getDirectCliConversation(id: string): DirectCliConversation | null {
+    return directCliConversations.get(id) || null;
+}
+
+export function completeDirectCliConversation(id: string, data: {
+    status: 'completed' | 'failed' | 'cancelled';
+}): void {
+    const conv = directCliConversations.get(id);
+    if (!conv) return;
+    conv.status = data.status;
+    conv.completed_at = new Date().toISOString();
+    console.log(`[server-store] DirectCLI conversation ${data.status}: ${id.slice(0, 8)}`);
+}
+
+// ─── DirectCLI Message CRUD ──────────────────────────────────────────
+
+export function addDirectCliMessage(
+    conversationId: string,
+    content: string,
+    type: DirectCliMessage['message_type'] = 'log',
+): DirectCliMessage {
+    const message: DirectCliMessage = {
+        id: uuidv4(),
+        conversation_id: conversationId,
+        content,
+        message_type: type,
+        created_at: new Date().toISOString(),
+    };
+    let messages = directCliMessagesByConversation.get(conversationId);
+    if (!messages) {
+        messages = [];
+        directCliMessagesByConversation.set(conversationId, messages);
+    }
+    messages.push(message);
+    return message;
+}
+
+export function getDirectCliMessages(conversationId: string): DirectCliMessage[] {
+    return directCliMessagesByConversation.get(conversationId) || [];
+}
+
+export function getDirectCliMessageCount(conversationId: string): number {
+    return (directCliMessagesByConversation.get(conversationId) || []).length;
+}
+
+// ─── DirectCLI Sync API ──────────────────────────────────────────────
+
+export interface DirectCliSyncData {
+    conversation: DirectCliConversation | null;
+    messages: DirectCliMessage[];
+}
+
+export function getDirectCliSyncData(conversationId: string): DirectCliSyncData {
+    const conversation = getDirectCliConversation(conversationId);
+    const messages = getDirectCliMessages(conversationId);
+    return { conversation, messages };
 }

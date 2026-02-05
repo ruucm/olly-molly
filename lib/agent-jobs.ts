@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import net from 'net';
-import { addMessage, completeConversation } from './server-store';
+import { addMessage, completeConversation, addDirectCliMessage, completeDirectCliConversation } from './server-store';
 
 // ─── Global Error Handlers for Debugging ─────────────────────────────
 // These help catch errors that might cause the process to crash
@@ -939,5 +939,381 @@ export function cancelJob(jobId: string): boolean {
     addMessage(job.conversationId, '⏹ Job was cancelled by user', 'system');
 
     runningJobs.delete(jobId);
+    return true;
+}
+
+// ─── DirectCLI Job Management ────────────────────────────────────────
+
+interface DirectCliJob {
+    id: string;
+    conversationId: string;
+    projectPath: string;
+    provider: AgentProvider;
+    startedAt: Date;
+    process: ChildProcess;
+    output: string;
+    status: 'running' | 'completed' | 'failed';
+}
+
+const directCliJobs = new Map<string, DirectCliJob>();
+
+export function getDirectCliJob(jobId: string): Omit<DirectCliJob, 'process'> | null {
+    const job = directCliJobs.get(jobId);
+    if (!job) return null;
+    return {
+        id: job.id,
+        conversationId: job.conversationId,
+        projectPath: job.projectPath,
+        provider: job.provider,
+        startedAt: job.startedAt,
+        output: job.output,
+        status: job.status,
+    };
+}
+
+export function getDirectCliJobByConversationId(conversationId: string): Omit<DirectCliJob, 'process'> | null {
+    for (const job of directCliJobs.values()) {
+        if (job.conversationId === conversationId) {
+            return {
+                id: job.id,
+                conversationId: job.conversationId,
+                projectPath: job.projectPath,
+                provider: job.provider,
+                startedAt: job.startedAt,
+                output: job.output,
+                status: job.status,
+            };
+        }
+    }
+    return null;
+}
+
+interface StartDirectCliJobParams {
+    jobId: string;
+    conversationId: string;
+    projectPath: string;
+    prompt: string;
+    provider: AgentProvider;
+}
+
+export async function startDirectCliJob(params: StartDirectCliJobParams): Promise<void> {
+    const { jobId, conversationId, projectPath, prompt, provider } = params;
+
+    console.log(`[agent-jobs] Starting DirectCLI job: ${jobId}`);
+    console.log(`[agent-jobs]   project: ${projectPath}`);
+    console.log(`[agent-jobs]   provider: ${provider}`);
+
+    // Find an available port for the agent to use
+    const availablePort = await findAvailablePort(3001);
+    console.log(`[agent-jobs] Found available port: ${availablePort}`);
+
+    // Configure command and args based on provider
+    let execPath: string;
+    let args: string[];
+    let startMessage: string;
+    let useStdin = true;
+
+    const modelLabel = getConfiguredModel(provider) ?? 'default';
+
+    if (provider === 'opencode') {
+        execPath = OPENCODE_CMD;
+        args = [...OPENCODE_STREAM_ARGS, '-'];
+        startMessage = `🚀 Starting OpenCode in ${projectPath}...\nModel: ${modelLabel}\n\n`;
+    } else if (provider === 'codex') {
+        execPath = CODEX_CMD;
+        const codex = getCodexInvocation();
+        args = codex.args;
+        useStdin = codex.useStdin;
+        startMessage = `🚀 Starting Codex CLI in ${projectPath}...\nModel: ${modelLabel}\n\n`;
+    } else {
+        execPath = CLAUDE_CMD;
+        args = CLAUDE_STREAM_ARGS;
+        startMessage = `🚀 Starting Claude Code in ${projectPath}...\nModel: ${modelLabel}\n\n`;
+    }
+
+    const isWindows = process.platform === 'win32';
+
+    // Build clean environment
+    const excludePatterns = [
+        'ELECTRON', 'CHROME', 'NODE_OPTIONS',
+        '__NEXT', 'NEXT_', '__CFBundle',
+        'ORIGINAL_XDG', 'GIO_', 'DBUS_',
+        'TURBOPACK',
+    ];
+
+    const spawnEnv: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+        if (value && !excludePatterns.some(pattern => key.toUpperCase().includes(pattern))) {
+            spawnEnv[key] = value;
+        }
+    }
+
+    spawnEnv.NODE_ENV = 'development';
+    spawnEnv.AVAILABLE_PORT = String(availablePort);
+    spawnEnv.DEV_PORT = String(availablePort);
+    spawnEnv.PORT = String(availablePort);
+
+    if (provider === 'opencode') {
+        spawnEnv.OPENCODE_PERMISSION = 'allow';
+        spawnEnv.OPENCODE_AUTO_APPROVE = 'true';
+    }
+
+    console.log(`[agent-jobs] Spawning DirectCLI process...`);
+    console.log(`[agent-jobs]   command: ${execPath}`);
+    console.log(`[agent-jobs]   args: ${JSON.stringify(args)}`);
+
+    let agentProcess: ReturnType<typeof spawn>;
+    try {
+        agentProcess = spawn(execPath, args, {
+            cwd: projectPath,
+            env: spawnEnv as NodeJS.ProcessEnv,
+            shell: isWindows,
+            detached: !isWindows,
+            stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        console.log(`[agent-jobs] DirectCLI process spawned, pid: ${agentProcess.pid}`);
+    } catch (spawnError) {
+        console.error(`[agent-jobs] CRITICAL: DirectCLI spawn() failed:`, spawnError);
+        throw spawnError;
+    }
+
+    if (!isWindows) {
+        agentProcess.unref();
+    }
+
+    if (useStdin) {
+        console.log(`[agent-jobs] Writing prompt to stdin (${prompt.length} chars)...`);
+        try {
+            agentProcess.stdin?.write(prompt);
+            agentProcess.stdin?.end();
+            console.log(`[agent-jobs] Stdin write completed`);
+        } catch (stdinError) {
+            console.error(`[agent-jobs] CRITICAL: stdin write failed:`, stdinError);
+        }
+    }
+
+    const job: DirectCliJob = {
+        id: jobId,
+        conversationId,
+        projectPath,
+        provider,
+        startedAt: new Date(),
+        process: agentProcess,
+        output: startMessage,
+        status: 'running',
+    };
+
+    directCliJobs.set(jobId, job);
+
+    let stdoutBuffer = '';
+    let streamedTextBuffer = '';
+    let lastFlushTime = Date.now();
+    let hasStreamedText = false;
+    let resultReceived = false;
+    let resultIsError = false;
+
+    const flushStreamedText = (force = false) => {
+        if (!streamedTextBuffer) return;
+        const now = Date.now();
+        if (!force && now - lastFlushTime < STREAM_FLUSH_INTERVAL_MS && streamedTextBuffer.length < STREAM_FLUSH_CHARS) {
+            return;
+        }
+        const chunk = streamedTextBuffer;
+        streamedTextBuffer = '';
+        lastFlushTime = now;
+        job.output += chunk;
+        addDirectCliMessage(conversationId, chunk, 'log');
+    };
+
+    const extractTextFromJson = (parsed: Record<string, unknown>): string | null => {
+        if (parsed?.type === 'stream_event' &&
+            (parsed.event as Record<string, unknown>)?.type === 'content_block_delta' &&
+            ((parsed.event as Record<string, unknown>)?.delta as Record<string, unknown>)?.type === 'text_delta') {
+            return ((parsed.event as Record<string, unknown>)?.delta as Record<string, unknown>)?.text as string;
+        }
+        if (parsed?.type === 'text' && typeof parsed.text === 'string') {
+            return parsed.text;
+        }
+        if (parsed?.type === 'content' && typeof parsed.content === 'string') {
+            return parsed.content;
+        }
+        if (parsed?.type === 'message' && typeof parsed.content === 'string') {
+            return parsed.content;
+        }
+        if (parsed?.role === 'assistant' && typeof parsed.content === 'string') {
+            return parsed.content;
+        }
+        if (parsed?.type === 'message' && parsed?.role === 'assistant') {
+            const content = parsed.content;
+            if (typeof content === 'string') {
+                return content;
+            }
+            if (Array.isArray(content)) {
+                return content
+                    .filter((c: Record<string, unknown>) => c.type === 'text' || c.type === 'output_text')
+                    .map((c: Record<string, unknown>) => c.text || c.content)
+                    .join('');
+            }
+        }
+        if (parsed?.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
+            return parsed.delta;
+        }
+        if (parsed?.type === 'content_block_delta' && typeof (parsed.delta as Record<string, unknown>)?.text === 'string') {
+            return (parsed.delta as Record<string, unknown>).text as string;
+        }
+        if (parsed?.type === 'tool_output' && typeof parsed.output === 'string') {
+            return `[tool] ${parsed.output}\n`;
+        }
+        return null;
+    };
+
+    const checkForResult = (parsed: Record<string, unknown>): { isResult: boolean; isError: boolean; text?: string } => {
+        if (parsed?.type === 'result') {
+            return {
+                isResult: true,
+                isError: parsed.is_error === true,
+                text: typeof parsed.result === 'string' ? parsed.result : undefined,
+            };
+        }
+        if (parsed?.type === 'done' || parsed?.type === 'complete' || parsed?.type === 'end') {
+            return { isResult: true, isError: parsed.error === true || parsed.success === false };
+        }
+        if (parsed?.event === 'done' || parsed?.event === 'complete') {
+            return { isResult: true, isError: parsed.error === true };
+        }
+        if (parsed?.type === 'response.completed' || parsed?.type === 'response.done') {
+            return { isResult: true, isError: false };
+        }
+        if (parsed?.type === 'error') {
+            return { isResult: true, isError: true, text: parsed.message as string || 'Unknown error' };
+        }
+        return { isResult: false, isError: false };
+    };
+
+    const handleJsonStreamLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        try {
+            const parsed = JSON.parse(trimmed);
+            const resultCheck = checkForResult(parsed);
+            if (resultCheck.isResult) {
+                resultReceived = true;
+                resultIsError = resultCheck.isError;
+                if (resultCheck.text && !hasStreamedText) {
+                    streamedTextBuffer += resultCheck.text;
+                    hasStreamedText = true;
+                    flushStreamedText(true);
+                }
+                return;
+            }
+            const text = extractTextFromJson(parsed);
+            if (text) {
+                streamedTextBuffer += text;
+                hasStreamedText = true;
+                flushStreamedText();
+                return;
+            }
+        } catch {
+            streamedTextBuffer += `${line}\n`;
+            flushStreamedText();
+        }
+    };
+
+    agentProcess.stdout?.on('data', (data: Buffer) => {
+        const text = data.toString('utf-8');
+        stdoutBuffer += text;
+        const lines = stdoutBuffer.split('\n');
+        stdoutBuffer = lines.pop() || '';
+        for (const line of lines) {
+            handleJsonStreamLine(line);
+        }
+        flushStreamedText();
+    });
+
+    agentProcess.stderr?.on('data', (data: Buffer) => {
+        const text = data.toString('utf-8');
+        const errorText = `[stderr] ${text}\n`;
+        job.output += errorText;
+        addDirectCliMessage(conversationId, errorText, 'error');
+    });
+
+    agentProcess.on('close', (code: number | null) => {
+        if (stdoutBuffer.trim()) {
+            handleJsonStreamLine(stdoutBuffer);
+            stdoutBuffer = '';
+        }
+        flushStreamedText(true);
+
+        console.log(`[agent-jobs] DirectCLI process exited with code: ${code}`);
+
+        const hasSuccessIndicators =
+            job.output.includes('completed') ||
+            job.output.includes('successfully') ||
+            job.output.includes('✅');
+
+        const hasFailureIndicators =
+            job.output.includes('[stderr] fatal:') ||
+            job.output.includes('[stderr] Error:') ||
+            job.output.includes('[error]') ||
+            job.output.includes('FAILED');
+
+        const streamSuccess = (resultReceived && !resultIsError) ||
+            (hasStreamedText && hasSuccessIndicators && !hasFailureIndicators);
+
+        const success = code === 0 || streamSuccess ||
+            (code === null && hasSuccessIndicators && !hasFailureIndicators);
+
+        job.status = success ? 'completed' : 'failed';
+
+        console.log(`[agent-jobs] DirectCLI job marked as: ${job.status}`);
+
+        completeDirectCliConversation(conversationId, { status: job.status });
+        addDirectCliMessage(
+            conversationId,
+            job.status === 'completed'
+                ? '✅ Execution completed successfully'
+                : '❌ Execution failed',
+            job.status === 'completed' ? 'success' : 'error',
+        );
+
+        setTimeout(() => {
+            directCliJobs.delete(jobId);
+        }, 60000);
+    });
+
+    agentProcess.on('error', (error: Error & { code?: string }) => {
+        job.status = 'failed';
+
+        let errorDetail = error.message;
+        if (error.code === 'ENOENT') {
+            errorDetail = `ENOENT: Command not found: ${execPath}. Make sure ${provider} CLI is installed and in PATH.`;
+        }
+
+        job.output += `\n[error] ${errorDetail}`;
+        console.error(`[agent-jobs] DirectCLI process error:`, error);
+
+        completeDirectCliConversation(conversationId, { status: 'failed' });
+        addDirectCliMessage(conversationId, `❌ Process error: ${errorDetail}`, 'error');
+
+        setTimeout(() => {
+            directCliJobs.delete(jobId);
+        }, 60000);
+    });
+}
+
+export function cancelDirectCliJob(jobId: string): boolean {
+    const job = directCliJobs.get(jobId);
+    if (!job || job.status !== 'running') {
+        return false;
+    }
+
+    job.process.kill('SIGTERM');
+    job.status = 'failed';
+    job.output += '\n[cancelled] Job was cancelled by user';
+
+    completeDirectCliConversation(job.conversationId, { status: 'cancelled' });
+    addDirectCliMessage(job.conversationId, '⏹ Job was cancelled by user', 'system');
+
+    directCliJobs.delete(jobId);
     return true;
 }
