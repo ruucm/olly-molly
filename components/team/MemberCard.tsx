@@ -103,6 +103,7 @@ interface SystemPromptEditorProps {
 
 
 export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileImageChange, onDelete }: SystemPromptEditorProps) {
+    const [name, setName] = useState(member?.name || '');
     const [prompt, setPrompt] = useState(member?.system_prompt || '');
     const [canGenerateImages, setCanGenerateImages] = useState(member?.can_generate_images === 1);
     const [canLogScreenshots, setCanLogScreenshots] = useState(member?.can_log_screenshots === 1);
@@ -113,9 +114,10 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
 
     const profileImage = member ? (uploadedImage || getProfileImage(member)) : undefined;
 
-    // Update prompt and image gen permission when member changes or modal opens
+    // Update prompt, name and permissions when member changes or modal opens
     useEffect(() => {
         if (member && isOpen) {
+            setName(member.name);
             setPrompt(member.system_prompt);
             setCanGenerateImages(member.can_generate_images === 1);
             setCanLogScreenshots(member.can_log_screenshots === 1);
@@ -131,9 +133,14 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
 
     const handleSave = async () => {
         if (member) {
+            if (!name.trim()) {
+                alert('Name is required');
+                return;
+            }
             try {
                 const updatedMember: Member = {
                     ...member,
+                    name: name.trim(),
                     system_prompt: prompt,
                     can_generate_images: canGenerateImages ? 1 : 0,
                     can_log_screenshots: canLogScreenshots ? 1 : 0,
@@ -245,7 +252,13 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
                                 </div>
 
                                 <div className="flex-1">
-                                    <p className="font-medium text-[var(--text-primary)] text-lg">{member.name}</p>
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        className="w-full font-medium text-[var(--text-primary)] text-lg bg-transparent border-b border-transparent hover:border-[var(--border-secondary)] focus:border-[var(--accent-primary)] focus:outline-none transition-colors"
+                                        placeholder="Member name"
+                                    />
                                     <p className="text-sm text-[var(--text-tertiary)]">{roleLabels[member.role] || member.role}</p>
                                 </div>
 
