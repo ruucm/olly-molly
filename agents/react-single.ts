@@ -376,6 +376,8 @@ function useFetch(url) {
 3. **라우팅은 해시 기반**: /#/about 형태
 4. **Tailwind CSS**: 유틸리티 클래스 우선 사용
 5. **Live Server 필요**: 로컬에서 테스트 시 서버 필요
+6. **API_BASE_URL**: 배포된 서버와 로컬 개발 환경에서 모두 동작하는 BASE 필요.
+
 
 ## 💡 Best Practices
 
