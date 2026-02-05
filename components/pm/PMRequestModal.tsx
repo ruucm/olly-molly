@@ -23,11 +23,11 @@ interface CreatedTicket {
     title: string;
     description: string;
     priority: string;
-    assigned_role: string;
-    assignee?: {
+    assigned_roles: string[];  // Support multiple roles
+    assignees: Array<{
         name: string;
         avatar: string;
-    };
+    }>;
 }
 
 interface PMRequestModalProps {
@@ -156,24 +156,41 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                 const baseOrderIndex = Date.now();
                 for (let i = 0; i < tasks.length; i++) {
                     const task = tasks[i];
-                    const assigneeId = memberService.getByRole(task.assignee_role)?.id || null;
+                    // Support both single role and multiple roles
+                    const assigneeRoles: string[] = task.assignee_roles
+                        ? task.assignee_roles
+                        : task.assignee_role
+                            ? [task.assignee_role]
+                            : [];
+
+                    // Find member IDs for all roles
+                    const assigneeIds: string[] = assigneeRoles
+                        .map((role: string) => memberService.getByRole(role)?.id)
+                        .filter((id): id is string => id !== null && id !== undefined);
+
                     const ticket = ticketService.create({
                         title: task.title,
                         description: task.description,
                         priority: task.priority,
-                        assignee_ids: assigneeId ? [assigneeId] : [],
+                        assignee_ids: assigneeIds,
                         project_id: projectId,
                         created_by: memberService.getByRole('PM')?.id || undefined,
                         order_index: baseOrderIndex + i, // Ensure sequential ordering
                     });
-                    const assignee = assigneeId ? memberService.getById(assigneeId) : undefined;
+
+                    // Get assignee details for display
+                    const assignees = assigneeIds
+                        .map(id => memberService.getById(id))
+                        .filter((m): m is NonNullable<typeof m> => m !== undefined)
+                        .map(m => ({ name: m.name, avatar: m.avatar || '' }));
+
                     createdTickets.push({
                         id: ticket.id,
                         title: ticket.title,
                         description: ticket.description || '',
                         priority: ticket.priority,
-                        assigned_role: task.assignee_role,
-                        assignee: assignee ? { name: assignee.name, avatar: assignee.avatar || '' } : undefined,
+                        assigned_roles: assigneeRoles,
+                        assignees,
                     });
                 }
 
@@ -569,13 +586,15 @@ export function PMRequestModal({ isOpen, onClose, onTicketsCreated, projectId }:
                                                 <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
                                                     {ticket.description}
                                                 </p>
-                                                <div className="flex items-center gap-2 mt-2">
-                                                    <Badge variant={roleColors[ticket.assigned_role]} size="sm">
-                                                        {roleLabels[ticket.assigned_role]}
-                                                    </Badge>
-                                                    {ticket.assignee && (
+                                                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                                    {ticket.assigned_roles.map((role, idx) => (
+                                                        <Badge key={idx} variant={roleColors[role] || 'default'} size="sm">
+                                                            {roleLabels[role] || role}
+                                                        </Badge>
+                                                    ))}
+                                                    {ticket.assignees.length > 0 && (
                                                         <span className="text-xs text-[var(--text-tertiary)]">
-                                                            → {ticket.assignee.avatar} {ticket.assignee.name}
+                                                            → {ticket.assignees.map(a => `${a.avatar} ${a.name}`).join(', ')}
                                                         </span>
                                                     )}
                                                 </div>

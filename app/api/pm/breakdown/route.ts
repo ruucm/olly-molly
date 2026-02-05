@@ -12,7 +12,8 @@ interface TaskFromAI {
     title: string;
     description: string;
     priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-    assignee_role: string;
+    assignee_role?: string;  // Single role (backward compatible)
+    assignee_roles?: string[];  // Multiple roles for collaborative tasks
 }
 
 interface ExistingTicket {
@@ -61,7 +62,7 @@ ${teamDescription}
 
 When given a feature request, you must:
 1. Break it down into simple, actionable tasks written for non-technical readers
-2. Assign each task to the appropriate team member based on their expertise
+2. Assign each task to the appropriate team member(s) based on their expertise
 3. Set priorities (CRITICAL > HIGH > MEDIUM > LOW)
 
 IMPORTANT RULES:
@@ -75,7 +76,8 @@ IMPORTANT RULES:
 - AVOID creating duplicate tasks that already exist on the board
 - ORDER tasks by execution sequence (tasks that must be done first should come first)
 - PREFIX each task title with a sequence number (e.g., "1. 로그인 화면 UI 구현", "2. 백엔드 API 연동")
-- CRITICAL: If the feature request contains environment variables (DB URL, API keys, credentials, etc.), you MUST include those values in the description of EVERY relevant task. For example, if DB_URL=postgres://... is provided, include it in tasks that need database access.${maxTickets ? `\n- CRITICAL: You MUST create AT MOST ${maxTickets} tasks. Prioritize the most important tasks if you need to limit.` : ''}`;
+- CRITICAL: If the feature request contains environment variables (DB URL, API keys, credentials, etc.), you MUST include those values in the description of EVERY relevant task. For example, if DB_URL=postgres://... is provided, include it in tasks that need database access.
+- MULTI-ASSIGNEE: When a task requires collaboration from multiple roles (e.g., frontend-backend integration, full-stack feature), use "assignee_roles" array instead of single "assignee_role". Only use multi-assignee when truly necessary for collaboration.${maxTickets ? `\n- CRITICAL: You MUST create AT MOST ${maxTickets} tasks. Prioritize the most important tasks if you need to limit.` : ''}`;
 
     if (existingTickets && existingTickets.length > 0) {
         prompt += `\n\n## EXISTING TICKETS ON THE BOARD\nThe following tickets already exist. Avoid creating duplicate or overlapping tasks:\n`;
@@ -92,22 +94,25 @@ IMPORTANT RULES:
 {
   "tasks": [
     {
-      "title": "1. 첫 번째 작업",
+      "title": "1. 첫 번째 작업 (단일 담당자)",
       "description": "Detailed task description in Korean",
       "priority": "HIGH",
       "assignee_role": "${exampleRole1}"
     },
     {
-      "title": "2. 두 번째 작업",
+      "title": "2. 두 번째 작업 (협업 필요시 다중 담당자)",
       "description": "Detailed task description in Korean",
       "priority": "HIGH",
-      "assignee_role": "${exampleRole2}"
+      "assignee_roles": ["${exampleRole1}", "${exampleRole2}"]
     }
   ],
   "summary": "Brief summary of the breakdown in Korean"
 }
 
-REMINDER: assignee_role MUST be one of: ${availableRoles.join(', ')}`;
+REMINDER:
+- Use "assignee_role" (single string) for tasks that one person can handle
+- Use "assignee_roles" (array) ONLY when collaboration between multiple roles is truly necessary
+- All roles MUST be one of: ${availableRoles.join(', ')}`;
 
     return prompt;
 }
