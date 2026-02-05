@@ -77,7 +77,14 @@ IMPORTANT RULES:
 - ORDER tasks by execution sequence (tasks that must be done first should come first)
 - PREFIX each task title with a sequence number (e.g., "1. 로그인 화면 UI 구현", "2. 백엔드 API 연동")
 - CRITICAL: If the feature request contains environment variables (DB URL, API keys, credentials, etc.), you MUST include those values in the description of EVERY relevant task. For example, if DB_URL=postgres://... is provided, include it in tasks that need database access.
-- MULTI-ASSIGNEE: When a task requires collaboration from multiple roles (e.g., frontend-backend integration, full-stack feature), use "assignee_roles" array instead of single "assignee_role". Only use multi-assignee when truly necessary for collaboration.${maxTickets ? `\n- CRITICAL: You MUST create AT MOST ${maxTickets} tasks. Prioritize the most important tasks if you need to limit.` : ''}`;
+- MULTI-ASSIGNEE: Use "assignee_roles" array (not single "assignee_role") for these cases:
+  * Payment integration (결제 연동) - needs FE_DEV (SDK, UI) + BACKEND_DEV (verification, webhook)
+  * API integration (API 연동) - needs FE_DEV (fetch, state) + BACKEND_DEV (endpoints)
+  * Authentication/Login (인증/로그인) - needs FE_DEV (form, token) + BACKEND_DEV (auth logic)
+  * Real-time features (실시간 기능) - needs FE_DEV (WebSocket client) + BACKEND_DEV (WebSocket server)
+  * File upload (파일 업로드) - needs FE_DEV (UI, preview) + BACKEND_DEV (storage, validation)
+  * Any feature where frontend calls backend APIs that don't exist yet
+  * Prefer multi-assignee for integration tasks rather than splitting into separate tickets${maxTickets ? `\n- CRITICAL: You MUST create AT MOST ${maxTickets} tasks. Prioritize the most important tasks if you need to limit.` : ''}`;
 
     if (existingTickets && existingTickets.length > 0) {
         prompt += `\n\n## EXISTING TICKETS ON THE BOARD\nThe following tickets already exist. Avoid creating duplicate or overlapping tasks:\n`;
