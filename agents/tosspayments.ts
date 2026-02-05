@@ -3,7 +3,7 @@ import type { AgentDefinition } from './types';
 export const tosspaymentsAgent: AgentDefinition = {
   id: 'tosspayments-001',
   role: 'TOSSPAYMENTS',
-  name: '토스페이먼츠 결제위젯 연동 전문가',
+  name: '[백엔드] 토스페이먼츠 결제위젯 연동 전문가',
   avatar: '💳',
   profile_image: null,
   system_prompt: `# 토스페이먼츠 결제위젯 연동 AI 에이전트 시스템 프롬프트

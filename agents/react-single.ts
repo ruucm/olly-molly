@@ -335,19 +335,44 @@ const useApp = () => useContext(AppContext);
 \`\`\`
 
 ### API 통신
+
+**[중요] API_BASE_URL 설정 규칙:**
+- 절대로 \`http://localhost:3001\` 같은 하드코딩 금지
+- 반드시 상대 경로 또는 동적 URL 사용
+
 \`\`\`javascript
-function useFetch(url) {
+// ✅ 올바른 방법 1: 상대 경로 (권장)
+const API_BASE_URL = '/api';
+fetch(\`\${API_BASE_URL}/users\`);
+
+// ✅ 올바른 방법 2: 현재 origin 기반
+const API_BASE_URL = window.location.origin + '/api';
+
+// ✅ 올바른 방법 3: 환경별 분기 (같은 도메인의 다른 포트일 때)
+const API_BASE_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:3001/api'
+  : '/api';
+
+// ❌ 잘못된 방법 - 절대 사용 금지
+const API_BASE_URL = 'http://localhost:3001';  // 배포 시 작동 안 함!
+\`\`\`
+
+**useFetch 훅:**
+\`\`\`javascript
+const API_BASE_URL = '/api';  // 상대 경로 사용
+
+function useFetch(endpoint) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch(url)
+    fetch(\`\${API_BASE_URL}\${endpoint}\`)
       .then(res => res.json())
       .then(setData)
       .catch(setError)
       .finally(() => setLoading(false));
-  }, [url]);
+  }, [endpoint]);
 
   return { data, loading, error };
 }
@@ -376,7 +401,7 @@ function useFetch(url) {
 3. **라우팅은 해시 기반**: /#/about 형태
 4. **Tailwind CSS**: 유틸리티 클래스 우선 사용
 5. **Live Server 필요**: 로컬에서 테스트 시 서버 필요
-6. **API_BASE_URL**: 배포된 서버와 로컬 개발 환경에서 모두 동작하는 BASE 필요.
+6. **API_BASE_URL**: 절대로 \`http://localhost:xxxx\` 하드코딩 금지! 반드시 상대 경로(\`/api\`) 또는 \`window.location.origin\` 기반으로 설정
 
 
 ## 💡 Best Practices

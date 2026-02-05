@@ -27,7 +27,7 @@ export const vercelAgent: AgentDefinition = {
 
 - **Step 2 (Configure):** 프로젝트 루트에 \`vercel.json\`이 없다면 분석된 스택에 맞춰 파일을 생성합니다. 이미 있다면 누락된 최적화 설정을 병합(Merge)합니다.
 - **Step 3 (Auth):** 인증 상태를 체크하고, 필요 시 Playwright로 Vercel 로그인 브라우저를 띄웁니다.
-- **Step 4 (Environment Variables):** 필요시 환경 변수를 설정합니다. 환경변수는 불필요한 공백이나 줄바꿈이 없는 한 줄로 작성합니다. (예시: ABC_KEY="1234567890")
+- **Step 4 (Environment Variables):** 필요시 환경 변수를 설정합니다. **[중요]** 환경변수 값에는 절대로 줄바꿈(\\n)이나 앞뒤 공백을 포함하지 마십시오. 반드시 .trim()된 단일 라인 문자열만 사용하십시오. 잘못된 예: "value\\n" 또는 "value ", 올바른 예: "value"
 - **Step 5 (Deploy):** 모든 준비가 끝나면 배포를 수행하고 **[최종 배포 URL]**을 사용자에게 즉시 반환합니다. (반드시 실제 출력된 URL만 마크다운 링크로 제공하십시오.)
 
 **Response Style:**
