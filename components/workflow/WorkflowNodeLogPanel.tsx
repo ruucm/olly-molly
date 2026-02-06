@@ -1,9 +1,25 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { X, RefreshCw, CheckCircle2, XCircle, Loader2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { useConversations, useConversationMessages, syncFromServer, type Ticket, type Member } from '@/lib/client-db';
+import { useConversations, useConversationMessages, syncFromServer, type Ticket, type Member, type ConversationMessage } from '@/lib/client-db';
+
+function stripAnsi(input: string): string {
+  return input
+    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B\][^\x07]*(\x07|\x1B\\)/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+}
+
+function classifyLogLine(line: string): 'stderr' | 'error' | 'normal' {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith('[stderr]')) return 'stderr';
+  if (trimmed.startsWith('[error]')) return 'error';
+  if (/^\s*(error:|fatal:)/i.test(trimmed)) return 'error';
+  return 'normal';
+}
 
 interface WorkflowNodeLogPanelProps {
   ticket: Ticket;
@@ -80,6 +96,34 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
   }, [messages, autoScroll]);
 
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
+
+  // Group consecutive log messages to prevent fragmented display from streaming chunks
+  const groupedMessages = useMemo(() => {
+    const sorted = [...messages].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    const groups: Array<{
+      id: string;
+      type: ConversationMessage['message_type'];
+      content: string;
+      created_at: string;
+    }> = [];
+
+    for (const msg of sorted) {
+      const lastGroup = groups[groups.length - 1];
+      if (msg.message_type === 'log' && lastGroup?.type === 'log') {
+        lastGroup.content += msg.content;
+      } else {
+        groups.push({
+          id: msg.id,
+          type: msg.message_type,
+          content: msg.content,
+          created_at: msg.created_at,
+        });
+      }
+    }
+    return groups;
+  }, [messages]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -206,13 +250,21 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
             <p>Waiting for logs...</p>
           </div>
         ) : (
-          <div className="space-y-1">
-            {[...messages]
-              .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-              .map((msg) => (
-              <div key={msg.id} className={`${getMessageTypeStyle(msg.message_type)} whitespace-pre-wrap break-all`}>
-                <span className="text-[var(--text-muted)] mr-2">[{formatTime(msg.created_at)}]</span>
-                {msg.content}
+          <div className="space-y-2">
+            {groupedMessages.map((group) => (
+              <div key={group.id} className={`rounded border border-[var(--border-primary)] p-2 ${getMessageTypeStyle(group.type)}`}>
+                <span className="text-[var(--text-muted)] mr-2 text-[10px]">[{formatTime(group.created_at)}]</span>
+                <div className="mt-1 space-y-0.5">
+                  {stripAnsi(group.content).split('\n').map((line, idx) => {
+                    const kind = classifyLogLine(line);
+                    const lineClass = kind === 'stderr' || kind === 'error' ? 'text-red-300' : '';
+                    return (
+                      <div key={idx} className={`whitespace-pre-wrap break-words ${lineClass}`}>
+                        {line}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
           </div>
