@@ -66,6 +66,31 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
         });
     }, [messages]);
 
+    // Group consecutive log messages into single blocks for readable display
+    const groupedMessages = useMemo(() => {
+        const groups: Array<{
+            id: string;
+            type: ConversationMessage['message_type'];
+            content: string;
+        }> = [];
+
+        for (const msg of sortedMessages) {
+            const lastGroup = groups[groups.length - 1];
+            // Merge consecutive 'log' messages into one group
+            if (msg.message_type === 'log' && lastGroup?.type === 'log') {
+                lastGroup.content += msg.content;
+            } else {
+                groups.push({
+                    id: msg.id,
+                    type: msg.message_type,
+                    content: msg.content,
+                });
+            }
+        }
+
+        return groups;
+    }, [sortedMessages]);
+
     // Scroll to bottom: once on initial load, then only when running
     useEffect(() => {
         if (!hasInitiallyScrolled && sortedMessages.length > 0) {
@@ -226,12 +251,12 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
                         <p>No messages yet...</p>
                     </div>
                 ) : (
-                    sortedMessages.map((message) => (
+                    groupedMessages.map((group) => (
                         <div
-                            key={message.id}
-                            className={`rounded-lg border p-2 font-mono text-xs ${getMessageTypeClass(message.message_type)}`}
+                            key={group.id}
+                            className={`rounded-lg border p-2 font-mono text-xs ${getMessageTypeClass(group.type)}`}
                         >
-                            {renderLogContent(message.content)}
+                            {renderLogContent(group.content)}
                         </div>
                     ))
                 )}
