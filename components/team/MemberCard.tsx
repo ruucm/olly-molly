@@ -343,7 +343,7 @@ export function SystemPromptEditor({ isOpen, onClose, member, onSave, onProfileI
 
                     <div className="flex justify-end gap-3 pt-2">
                         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-                        {member && member.is_default === 0 && onDelete && (
+                        {member && onDelete && (
                             <Button
                                 variant="danger"
                                 onClick={() => {
