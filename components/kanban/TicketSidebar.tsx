@@ -204,7 +204,17 @@ export function TicketSidebar({
             setExecuting(false);
             setSelectedConversationId(null);
             setCurrentJobId(null);
-            setAttachments([]);
+
+            // Load existing attachments from filesystem
+            const project = projectService.getActive();
+            if (project) {
+                fetch(`/api/agent/attachments?projectPath=${encodeURIComponent(project.path)}&ticketId=${encodeURIComponent(ticket.id)}`)
+                    .then(res => res.json())
+                    .then(data => setAttachments(data.attachments || []))
+                    .catch(() => setAttachments([]));
+            } else {
+                setAttachments([]);
+            }
         }
     }, [ticket?.id]);
 

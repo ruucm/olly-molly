@@ -138,7 +138,17 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             setStatus(ticket.status);
             setPriority(ticket.priority);
             setSelectedAssigneeIds(ticket.assignee_ids || []);
-            setAttachments([]);
+
+            // Load existing attachments from filesystem
+            const project = projectService.getActive();
+            if (project) {
+                fetch(`/api/agent/attachments?projectPath=${encodeURIComponent(project.path)}&ticketId=${encodeURIComponent(ticket.id)}`)
+                    .then(res => res.json())
+                    .then(data => setAttachments(data.attachments || []))
+                    .catch(() => setAttachments([]));
+            } else {
+                setAttachments([]);
+            }
         }
     }, [ticket]);
 

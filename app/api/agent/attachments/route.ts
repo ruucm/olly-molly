@@ -101,6 +101,45 @@ export async function POST(request: NextRequest) {
     }
 }
 
+// GET: List existing attachments for a ticket
+export async function GET(request: NextRequest) {
+    try {
+        const { searchParams } = new URL(request.url);
+        const projectPath = searchParams.get('projectPath');
+        const ticketId = searchParams.get('ticketId');
+
+        if (!projectPath || !ticketId) {
+            return NextResponse.json({ error: 'projectPath and ticketId are required' }, { status: 400 });
+        }
+
+        const attachDir = getAttachmentsDir(projectPath, ticketId);
+
+        if (!fs.existsSync(attachDir)) {
+            return NextResponse.json({ attachments: [] });
+        }
+
+        const attachments = fs.readdirSync(attachDir)
+            .filter(filename => isAllowedImage(filename))
+            .map(filename => {
+                const filePath = path.join(attachDir, filename);
+                const stats = fs.statSync(filePath);
+                return {
+                    name: filename,
+                    path: filePath,
+                    size: stats.size,
+                };
+            });
+
+        return NextResponse.json({ attachments });
+    } catch (error) {
+        console.error('List attachments error:', error);
+        return NextResponse.json(
+            { error: error instanceof Error ? error.message : 'Failed to list attachments' },
+            { status: 500 }
+        );
+    }
+}
+
 // DELETE: Remove attachment(s) for a ticket
 export async function DELETE(request: NextRequest) {
     try {
