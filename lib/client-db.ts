@@ -1332,6 +1332,7 @@ export function initClientDb(): Promise<void> {
           .map((a) => a.id)
       );
 
+      const defaultIds = new Set(DEFAULT_AGENTS.map((a) => a.id));
       const newBuiltinAgents = DEFAULT_AGENTS.filter((agent) => !existingIds.has(agent.id));
 
       if (newBuiltinAgents.length > 0) {
@@ -1353,6 +1354,15 @@ export function initClientDb(): Promise<void> {
         dbDebug('init:3', `✓ Added ${newBuiltinAgents.length} builtin agents`);
       } else {
         dbDebug('init:3', '✓ No new builtin agents to add');
+      }
+
+      // Remove builtin agents that are no longer in DEFAULT_AGENTS
+      const removedIds = Array.from(existingIds).filter((id) => !defaultIds.has(id));
+      if (removedIds.length > 0) {
+        for (const id of removedIds) {
+          marketAgentsCollection.delete(id);
+        }
+        dbDebug('init:3', `✓ Removed ${removedIds.length} obsolete builtin agents`);
       }
 
       // ─────────────────────────────────────────────────────────────────────
