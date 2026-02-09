@@ -107,6 +107,9 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
     const [provider, setProvider] = useState<AgentProvider>('claude');
     const [providerLoaded, setProviderLoaded] = useState(false);
     const [expandedLog, setExpandedLog] = useState(false);
+    const [attachments, setAttachments] = useState<Array<{ name: string; path: string; size: number }>>([]);
+    const [uploading, setUploading] = useState(false);
+    const imageInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -135,6 +138,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             setStatus(ticket.status);
             setPriority(ticket.priority);
             setSelectedAssigneeIds(ticket.assignee_ids || []);
+            setAttachments([]);
         }
     }, [ticket]);
 
@@ -208,6 +212,58 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
         });
     };
 
+    // Image attachment handlers
+    const handleAttachImages = async (files: FileList | null) => {
+        if (!files || files.length === 0 || !ticket) return;
+        const project = projectService.getActive();
+        if (!project) return;
+
+        setUploading(true);
+        try {
+            const formData = new FormData();
+            formData.append('projectPath', project.path);
+            formData.append('ticketId', ticket.id);
+            for (const file of Array.from(files)) {
+                formData.append('files', file);
+            }
+            const res = await fetch('/api/agent/attachments', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await res.json();
+            if (data.success && data.attachments) {
+                setAttachments(prev => [...prev, ...data.attachments]);
+            }
+            if (data.errors?.length) {
+                alert(data.errors.map((e: { name: string; error: string }) => `${e.name}: ${e.error}`).join('\n'));
+            }
+        } catch (error) {
+            console.error('Failed to upload attachments:', error);
+        } finally {
+            setUploading(false);
+            if (imageInputRef.current) imageInputRef.current.value = '';
+        }
+    };
+
+    const handleRemoveAttachment = async (filename: string) => {
+        const project = projectService.getActive();
+        if (!project || !ticket) return;
+        try {
+            await fetch('/api/agent/attachments', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectPath: project.path,
+                    ticketId: ticket.id,
+                    filename,
+                }),
+            });
+            setAttachments(prev => prev.filter(a => a.name !== filename));
+        } catch (error) {
+            console.error('Failed to remove attachment:', error);
+        }
+    };
+
     const handleExecuteAgent = async () => {
         if (!ticket || selectedAssigneeIds.length === 0) return;
 
@@ -256,6 +312,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                     },
                     feedback: feedback.trim() || undefined,
                     provider,
+                    attachments: attachments.length > 0 ? attachments.map(a => a.path) : undefined,
                 }),
             });
 
@@ -263,6 +320,7 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
 
             if (data.success) {
                 setStatus('IN_PROGRESS');
+                setAttachments([]);
                 // Job polling will pick up the running job
             } else {
                 setExecuting(false);
@@ -453,6 +511,50 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
                                 rows={2}
                                 className="text-sm bg-[var(--bg-secondary)]"
                             />
+                        </div>
+
+                        {/* Image Attachments */}
+                        <div className="mt-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                                <label className="text-sm text-[var(--text-tertiary)]">Image Attachments:</label>
+                                <button
+                                    type="button"
+                                    onClick={() => imageInputRef.current?.click()}
+                                    disabled={executing || uploading}
+                                    className="text-sm text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors"
+                                >
+                                    {uploading ? 'Uploading...' : '+ Add Images'}
+                                </button>
+                                <input
+                                    ref={imageInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(e) => handleAttachImages(e.target.files)}
+                                />
+                            </div>
+                            {attachments.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                    {attachments.map((att) => (
+                                        <span
+                                            key={att.name}
+                                            className="inline-flex items-center gap-1 px-2 py-1 bg-[var(--bg-secondary)] rounded text-xs text-[var(--text-secondary)] border border-[var(--border-primary)]"
+                                            title={att.path}
+                                        >
+                                            🖼 {att.name}
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveAttachment(att.name)}
+                                                disabled={executing}
+                                                className="text-red-400 hover:text-red-300 ml-0.5 disabled:opacity-50"
+                                            >
+                                                x
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {!hasActiveProject && (

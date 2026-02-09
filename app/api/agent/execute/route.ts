@@ -30,6 +30,7 @@ interface AgentExecuteRequest {
     conversation_id?: string;
     feedback?: string;
     provider?: AgentProvider;
+    attachments?: string[]; // Absolute paths to image attachments
 }
 
 function buildAgentPrompt(ticket: {
@@ -45,7 +46,7 @@ function buildAgentPrompt(ticket: {
 }, project: {
     name: string;
     path: string;
-}, feedback?: string): string {
+}, feedback?: string, attachments?: string[]): string {
     // Check if role is QA to add specific port instructions
     const isQA = agent.role === 'QA';
     const qaInstruction = isQA
@@ -89,6 +90,14 @@ This is MANDATORY for visual changes so other agents can reference your work.`
         ? `\n\nIMPORTANT FEEDBACK FROM USER:\n${feedback}\n\nPlease address this feedback specifically in your implementation.`
         : '';
 
+    const attachmentInstruction = attachments && attachments.length > 0
+        ? `\n\nIMAGE ATTACHMENTS (MUST READ):
+The user has attached ${attachments.length} image(s) for reference. You MUST read and analyze each image before starting work.
+${attachments.map((filePath, i) => `${i + 1}. Read this image file: ${filePath}`).join('\n')}
+
+Use the Read tool to view each image file listed above. These images provide visual context for the task (e.g., design mockups, bug screenshots, reference layouts). Understand the visual content before implementing.`
+        : '';
+
     return `You are acting as ${agent.name} (${agent.role}) for the project "${project.name}".
 
 ${agent.system_prompt}
@@ -98,7 +107,7 @@ ${agent.system_prompt}
 TASK TO COMPLETE:
 Title: ${ticket.title}
 ${ticket.description ? `Description: ${ticket.description}` : ''}
-${feedbackSection}
+${feedbackSection}${attachmentInstruction}
 
 ---
 
@@ -170,7 +179,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Build prompt
-        const prompt = buildAgentPrompt(ticket, agent, project, body.feedback);
+        const prompt = buildAgentPrompt(ticket, agent, project, body.feedback, body.attachments);
 
         // Use provided provider or default to 'claude'
         const provider: AgentProvider = body.provider || 'claude';

@@ -481,6 +481,18 @@ function extractSummary(output: string): string {
     return '- 작업 완료됨';
 }
 
+function cleanupAttachments(projectPath: string, ticketId: string): void {
+    try {
+        const attachDir = path.join(projectPath, '.agent-attachments', ticketId);
+        if (fs.existsSync(attachDir)) {
+            fs.rmSync(attachDir, { recursive: true, force: true });
+            console.log(`[agent-jobs] Cleaned up attachments: ${attachDir}`);
+        }
+    } catch (error) {
+        console.error(`[agent-jobs] Failed to cleanup attachments:`, error);
+    }
+}
+
 interface StartJobParams {
     jobId: string;
     conversationId: string;
@@ -889,6 +901,9 @@ export async function startBackgroundJob(params: StartJobParams): Promise<void> 
             output: job.output,
         });
 
+        // Cleanup image attachments
+        cleanupAttachments(projectPath, ticketId);
+
         // Remove from running jobs after a delay (keep for status check)
         setTimeout(() => {
             runningJobs.delete(jobId);
@@ -937,6 +952,9 @@ export function cancelJob(jobId: string): boolean {
 
     completeConversation(job.conversationId, { status: 'cancelled' });
     addMessage(job.conversationId, '⏹ Job was cancelled by user', 'system');
+
+    // Cleanup image attachments
+    cleanupAttachments(job.projectPath, job.ticketId);
 
     runningJobs.delete(jobId);
     return true;

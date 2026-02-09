@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
@@ -162,6 +162,11 @@ export function TicketSidebar({
     const [executing, setExecuting] = useState(false);
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
+    // Image attachments
+    const [attachments, setAttachments] = useState<Array<{ name: string; path: string; size: number }>>([]);
+    const [uploading, setUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     // UI state
     const [showTicketDetails, setShowTicketDetails] = useState(true);
     const [showAgentControls, setShowAgentControls] = useState(false);
@@ -199,6 +204,7 @@ export function TicketSidebar({
             setExecuting(false);
             setSelectedConversationId(null);
             setCurrentJobId(null);
+            setAttachments([]);
         }
     }, [ticket?.id]);
 
@@ -340,6 +346,58 @@ export function TicketSidebar({
         };
     }, [ticket?.id, onTicketUpdate, currentJobId, ticket?.assignees, ticket?.title]);
 
+    // Image attachment handlers
+    const handleAttachImages = async (files: FileList | null) => {
+        if (!files || files.length === 0 || !ticket) return;
+        const project = projectService.getActive();
+        if (!project) return;
+
+        setUploading(true);
+        try {
+            const formData = new FormData();
+            formData.append('projectPath', project.path);
+            formData.append('ticketId', ticket.id);
+            for (const file of Array.from(files)) {
+                formData.append('files', file);
+            }
+            const res = await fetch('/api/agent/attachments', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await res.json();
+            if (data.success && data.attachments) {
+                setAttachments(prev => [...prev, ...data.attachments]);
+            }
+            if (data.errors?.length) {
+                alert(data.errors.map((e: { name: string; error: string }) => `${e.name}: ${e.error}`).join('\n'));
+            }
+        } catch (error) {
+            console.error('Failed to upload attachments:', error);
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const handleRemoveAttachment = async (filename: string) => {
+        const project = projectService.getActive();
+        if (!project || !ticket) return;
+        try {
+            await fetch('/api/agent/attachments', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectPath: project.path,
+                    ticketId: ticket.id,
+                    filename,
+                }),
+            });
+            setAttachments(prev => prev.filter(a => a.name !== filename));
+        } catch (error) {
+            console.error('Failed to remove attachment:', error);
+        }
+    };
+
     const persistTicketDetails = async () => {
         if (!ticket) return;
         await onTicketUpdate(ticket.id, {
@@ -411,6 +469,7 @@ export function TicketSidebar({
                     },
                     feedback: feedback.trim() || undefined,
                     provider,
+                    attachments: attachments.length > 0 ? attachments.map(a => a.path) : undefined,
                 }),
             });
 
@@ -428,6 +487,7 @@ export function TicketSidebar({
 
                 setSelectedConversationId(data.conversation_id);
                 setFeedback('');
+                setAttachments([]);
                 setStatus('IN_PROGRESS');
                 onTicketUpdate(ticket.id, { status: 'IN_PROGRESS' });
                 setShowAgentControls(false);
@@ -700,6 +760,50 @@ export function TicketSidebar({
                                     📸 스크린샷 테스트 (Playwright)
                                 </span>
                             </label>
+
+                            {/* Image Attachments */}
+                            <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                    <label className="text-xs text-tertiary">Attachments:</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={executing || uploading}
+                                        className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors"
+                                    >
+                                        {uploading ? 'Uploading...' : '+ Add Images'}
+                                    </button>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        multiple
+                                        className="hidden"
+                                        onChange={(e) => handleAttachImages(e.target.files)}
+                                    />
+                                </div>
+                                {attachments.length > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                        {attachments.map((att) => (
+                                            <span
+                                                key={att.name}
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-tertiary rounded text-xs text-secondary"
+                                                title={att.path}
+                                            >
+                                                🖼 {att.name}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveAttachment(att.name)}
+                                                    disabled={executing}
+                                                    className="text-red-400 hover:text-red-300 ml-0.5 disabled:opacity-50"
+                                                >
+                                                    x
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
 
                             {!hasActiveProject && (
                                 <p className="text-xs text-amber-400">⚠️ Select a project first</p>
