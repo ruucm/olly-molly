@@ -29,24 +29,16 @@ export type { AgentDefinition, AgentCategory, MarketAgentDefinition } from './ty
 export { getAgentMetadata } from './types';
 
 import { pmAgent } from './pm';
-import { feDevAgent } from './fe-dev';
-import { beDevAgent } from './be-dev';
-import { qaAgent } from './qa';
-import { devopsAgent } from './devops';
 import { bugHunterAgent } from './bug-hunter';
 import { uiArchitectAgent } from './ui-architect';
 import { interactionDevAgent } from './interaction-dev';
 import { vercelAgent } from './vercel-agent';
 import { simpleBackendAgent } from './simple-backend';
-import { dbSqliteAgent } from './db-sqlite';
-import { dbPostgresqlAgent } from './db-postgresql';
 import { githubAgent } from './github-agent';
 import { recipeAgent } from './recipe';
 import { dystopiaDiaryAgent } from './dystopia-diary';
 import { instagramAnalystAgent } from './instagram-analyst';
 import { adCreatorAgent } from './ad-creator';
-import { reactSpaAgent } from './react-spa';
-import { authBackendAgent } from './auth-backend';
 import { tosspaymentsAgent } from './tosspayments';
 import { reactSingleAgent } from './react-single';
 import { authSingleAgent } from './auth-single';
@@ -55,24 +47,16 @@ import type { AgentDefinition } from './types';
 
 // Export individual agents for direct access
 export { pmAgent } from './pm';
-export { feDevAgent } from './fe-dev';
-export { beDevAgent } from './be-dev';
-export { qaAgent } from './qa';
-export { devopsAgent } from './devops';
 export { bugHunterAgent } from './bug-hunter';
 export { uiArchitectAgent } from './ui-architect';
 export { interactionDevAgent } from './interaction-dev';
 export { vercelAgent } from './vercel-agent';
 export { simpleBackendAgent } from './simple-backend';
-export { dbSqliteAgent } from './db-sqlite';
-export { dbPostgresqlAgent } from './db-postgresql';
 export { githubAgent } from './github-agent';
 export { recipeAgent } from './recipe';
 export { dystopiaDiaryAgent } from './dystopia-diary';
 export { instagramAnalystAgent } from './instagram-analyst';
 export { adCreatorAgent } from './ad-creator';
-export { reactSpaAgent } from './react-spa';
-export { authBackendAgent } from './auth-backend';
 export { tosspaymentsAgent } from './tosspayments';
 export { reactSingleAgent } from './react-single';
 export { authSingleAgent } from './auth-single';
@@ -83,24 +67,16 @@ export { authSingleAgent } from './auth-single';
  */
 export const DEFAULT_AGENTS: AgentDefinition[] = [
   pmAgent,
-  feDevAgent,
-  beDevAgent,
-  qaAgent,
-  devopsAgent,
   bugHunterAgent,
   uiArchitectAgent,
   interactionDevAgent,
   vercelAgent,
   simpleBackendAgent,
-  dbSqliteAgent,
-  dbPostgresqlAgent,
   githubAgent,
   recipeAgent,
   dystopiaDiaryAgent,
   instagramAnalystAgent,
   adCreatorAgent,
-  reactSpaAgent,
-  authBackendAgent,
   tosspaymentsAgent,
   reactSingleAgent,
   authSingleAgent,
