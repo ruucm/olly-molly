@@ -25,6 +25,7 @@ interface AgentMarketModalProps {
     tags: string[];
     can_generate_images: boolean;
     can_log_screenshots: boolean;
+    preferred_provider: 'claude' | 'opencode' | 'codex';
   }) => void;
   onDeleteMarketAgent: (id: string) => void;
 }

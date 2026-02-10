@@ -17,9 +17,18 @@ interface CreateAgentFormProps {
     tags: string[];
     can_generate_images: boolean;
     can_log_screenshots: boolean;
+    preferred_provider: 'claude' | 'opencode' | 'codex';
   }) => void;
   onCancel: () => void;
 }
+
+type AgentProvider = 'claude' | 'opencode' | 'codex';
+
+const providerOptions: { value: AgentProvider; label: string; emoji: string; activeColor: string }[] = [
+  { value: 'claude', label: 'Claude', emoji: '🟠', activeColor: 'bg-indigo-500 text-white' },
+  { value: 'codex', label: 'Codex', emoji: '🔵', activeColor: 'bg-orange-500 text-white' },
+  { value: 'opencode', label: 'OpenCode', emoji: '⚪️', activeColor: 'bg-emerald-500 text-white' },
+];
 
 const categoryOptions: { value: AgentCategory; label: string; emoji: string }[] = [
   { value: 'management', label: '관리', emoji: '📋' },
@@ -38,6 +47,7 @@ export function CreateAgentForm({ onSave, onCancel }: CreateAgentFormProps) {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [canGenerateImages, setCanGenerateImages] = useState(false);
   const [canLogScreenshots, setCanLogScreenshots] = useState(false);
+  const [preferredProvider, setPreferredProvider] = useState<AgentProvider>('claude');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +63,7 @@ export function CreateAgentForm({ onSave, onCancel }: CreateAgentFormProps) {
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       can_generate_images: canGenerateImages,
       can_log_screenshots: canLogScreenshots,
+      preferred_provider: preferredProvider,
     });
   };
 
@@ -95,6 +106,28 @@ export function CreateAgentForm({ onSave, onCancel }: CreateAgentFormProps) {
                 category === opt.value
                   ? 'bg-[var(--accent-primary)] text-white border-[var(--accent-primary)]'
                   : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border-primary)] hover:border-[var(--accent-primary)]'
+              }`}
+            >
+              {opt.emoji} {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
+          기본 Provider
+        </label>
+        <div className="flex gap-2">
+          {providerOptions.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setPreferredProvider(opt.value)}
+              className={`px-3 py-1.5 text-sm rounded-md font-medium transition-all ${
+                preferredProvider === opt.value
+                  ? opt.activeColor
+                  : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border-primary)] hover:border-[var(--accent-primary)]'
               }`}
             >
               {opt.emoji} {opt.label}

@@ -24,6 +24,12 @@ const categoryLabels: Record<string, string> = {
   custom: '커스텀',
 };
 
+const providerBadge: Record<string, { emoji: string; label: string; bg: string; text: string }> = {
+  claude: { emoji: '🟠', label: 'Claude', bg: 'bg-indigo-500/20', text: 'text-indigo-400' },
+  codex: { emoji: '🔵', label: 'Codex', bg: 'bg-orange-500/20', text: 'text-orange-400' },
+  opencode: { emoji: '⚪️', label: 'OpenCode', bg: 'bg-emerald-500/20', text: 'text-emerald-400' },
+};
+
 export function AgentMarketCard({ agent, onAddToTeam, isInTeam }: AgentMarketCardProps) {
   const colors = categoryColors[agent.category] || categoryColors.custom;
 
@@ -84,9 +90,17 @@ export function AgentMarketCard({ agent, onAddToTeam, isInTeam }: AgentMarketCar
         </button>
       </div>
 
-      {/* Capabilities */}
-      {(agent.can_generate_images === 1 || agent.can_log_screenshots === 1) && (
+      {/* Capabilities & Provider */}
+      {(agent.can_generate_images === 1 || agent.can_log_screenshots === 1 || agent.preferred_provider) && (
         <div className="mt-3 pt-3 border-t border-[var(--border-primary)] flex gap-3 text-xs text-[var(--text-muted)]">
+          {agent.preferred_provider && (() => {
+            const badge = providerBadge[agent.preferred_provider] || providerBadge.claude;
+            return (
+              <span className={`px-2 py-0.5 rounded ${badge.bg} ${badge.text}`}>
+                {badge.emoji} {badge.label}
+              </span>
+            );
+          })()}
           {agent.can_generate_images === 1 && (
             <span>🎨 이미지 생성</span>
           )}
