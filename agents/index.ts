@@ -42,6 +42,11 @@ import { adCreatorAgent } from './ad-creator';
 import { tosspaymentsAgent } from './tosspayments';
 import { reactSingleAgent } from './react-single';
 import { authSingleAgent } from './auth-single';
+import { googleLoginAgent } from './google-login';
+import { iosPushAgent } from './ios-push';
+import { iosPwaLayoutAgent } from './ios-pwa-layout';
+import { kakaoLoginAgent } from './kakao-login';
+import { supabaseUploadAgent } from './supabase-upload';
 
 import type { AgentDefinition } from './types';
 
@@ -60,6 +65,11 @@ export { adCreatorAgent } from './ad-creator';
 export { tosspaymentsAgent } from './tosspayments';
 export { reactSingleAgent } from './react-single';
 export { authSingleAgent } from './auth-single';
+export { googleLoginAgent } from './google-login';
+export { iosPushAgent } from './ios-push';
+export { iosPwaLayoutAgent } from './ios-pwa-layout';
+export { kakaoLoginAgent } from './kakao-login';
+export { supabaseUploadAgent } from './supabase-upload';
 
 /**
  * Array of all default agents.
@@ -80,4 +90,9 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   tosspaymentsAgent,
   reactSingleAgent,
   authSingleAgent,
+  googleLoginAgent,
+  iosPushAgent,
+  iosPwaLayoutAgent,
+  kakaoLoginAgent,
+  supabaseUploadAgent,
 ];

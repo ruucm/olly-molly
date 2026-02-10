@@ -92,6 +92,31 @@ export function getAgentMetadata(role: string): { description: string; category:
       category: 'development',
       tags: ['express', 'authentication', 'login', 'jwt', 'bcrypt', 'single-file'],
     },
+    GOOGLE_LOGIN: {
+      description: 'Google Identity Services(GIS)를 활용한 Google 로그인 OAuth 연동 전문가입니다.',
+      category: 'development',
+      tags: ['google', 'oauth', 'login', 'gis', 'authentication', 'vercel'],
+    },
+    IOS_PUSH: {
+      description: 'iOS PWA 웹 푸시 알림 구현 및 Vercel 서버리스 환경 배포를 전문으로 하는 에이전트입니다.',
+      category: 'development',
+      tags: ['ios', 'pwa', 'push-notification', 'service-worker', 'vercel', 'web-push'],
+    },
+    IOS_PWA_LAYOUT: {
+      description: 'iOS Safari/PWA의 뷰포트, Safe Area, 레이아웃 문제를 해결하는 전문가입니다.',
+      category: 'development',
+      tags: ['ios', 'pwa', 'layout', 'viewport', 'safe-area', 'css', 'mobile'],
+    },
+    KAKAO_LOGIN: {
+      description: '카카오 OAuth 2.0 REST API를 활용한 카카오 로그인 연동 전문가입니다.',
+      category: 'development',
+      tags: ['kakao', 'oauth', 'login', 'authentication', 'vercel', 'korean'],
+    },
+    SUPABASE_UPLOAD: {
+      description: 'Supabase Storage와 multer를 활용한 파일/이미지 업로드 기능 구현 전문가입니다.',
+      category: 'development',
+      tags: ['supabase', 'storage', 'upload', 'multer', 'file', 'image', 's3'],
+    },
   };
 
   return metadata[role] || {
