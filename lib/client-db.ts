@@ -1199,6 +1199,92 @@ const pmRequestsCollection = createIndexedDbCollectionWithOptions<PmRequest>(
 let initPromise: Promise<void> | null = null;
 
 /**
+ * Sync builtin agents in marketAgentsCollection with DEFAULT_AGENTS.
+ * - Insert new agents not yet in collection
+ * - Update existing agents whose properties differ from DEFAULT_AGENTS
+ * - Remove obsolete agents no longer in DEFAULT_AGENTS
+ */
+function syncBuiltinAgents(): void {
+  const existingBuiltins = Array.from(marketAgentsCollection.values()).filter(
+    (a) => a.is_builtin === 1,
+  );
+  const existingIds = new Set(existingBuiltins.map((a) => a.id));
+  const defaultIds = new Set(DEFAULT_AGENTS.map((a) => a.id));
+
+  // 1. Insert new builtin agents
+  const newAgents = DEFAULT_AGENTS.filter((a) => !existingIds.has(a.id));
+  if (newAgents.length > 0) {
+    const now = new Date().toISOString();
+    marketAgentsCollection.insert(
+      newAgents.map((agent) => {
+        const metadata = getAgentMetadata(agent.role);
+        return {
+          ...agent,
+          preferred_provider: agent.preferred_provider || 'claude',
+          description: metadata.description,
+          category: metadata.category,
+          tags: metadata.tags,
+          is_builtin: 1,
+          created_at: now,
+          updated_at: now,
+        };
+      }),
+    );
+    dbDebug('sync-agents', `✓ Added ${newAgents.length} new builtin agents`);
+  }
+
+  // 2. Update existing builtin agents to match latest definitions
+  let updatedCount = 0;
+  for (const agent of DEFAULT_AGENTS) {
+    if (!existingIds.has(agent.id)) continue;
+    const existing = marketAgentsCollection.get(agent.id);
+    if (!existing) continue;
+    const metadata = getAgentMetadata(agent.role);
+    const needsUpdate =
+      existing.role !== agent.role ||
+      existing.name !== agent.name ||
+      existing.avatar !== agent.avatar ||
+      existing.profile_image !== agent.profile_image ||
+      existing.system_prompt !== agent.system_prompt ||
+      existing.can_generate_images !== agent.can_generate_images ||
+      existing.can_log_screenshots !== agent.can_log_screenshots ||
+      existing.preferred_provider !== (agent.preferred_provider || 'claude') ||
+      existing.description !== metadata.description ||
+      existing.category !== metadata.category ||
+      JSON.stringify(existing.tags) !== JSON.stringify(metadata.tags);
+    if (needsUpdate) {
+      marketAgentsCollection.update(agent.id, (draft) => {
+        draft.role = agent.role;
+        draft.name = agent.name;
+        draft.avatar = agent.avatar;
+        draft.profile_image = agent.profile_image;
+        draft.system_prompt = agent.system_prompt;
+        draft.can_generate_images = agent.can_generate_images;
+        draft.can_log_screenshots = agent.can_log_screenshots;
+        draft.preferred_provider = agent.preferred_provider || 'claude';
+        draft.description = metadata.description;
+        draft.category = metadata.category;
+        draft.tags = metadata.tags;
+        draft.updated_at = new Date().toISOString();
+      });
+      updatedCount++;
+    }
+  }
+  if (updatedCount > 0) {
+    dbDebug('sync-agents', `✓ Updated ${updatedCount} builtin agents`);
+  }
+
+  // 3. Remove obsolete builtin agents no longer in DEFAULT_AGENTS
+  const removedIds = Array.from(existingIds).filter((id) => !defaultIds.has(id));
+  if (removedIds.length > 0) {
+    for (const id of removedIds) {
+      marketAgentsCollection.delete(id);
+    }
+    dbDebug('sync-agents', `✓ Removed ${removedIds.length} obsolete builtin agents`);
+  }
+}
+
+/**
  * Load all data from IndexedDB into collections (background loading after init)
  * This runs AFTER the app is shown, so UI is responsive immediately.
  */
@@ -1245,6 +1331,11 @@ async function loadAllCollectionsFromDb(): Promise<void> {
       loadCollection(STORE_NAMES.workflowEdges, workflowEdgesCollection),
       loadCollection(STORE_NAMES.pmRequests, pmRequestsCollection),
     ]);
+
+    // After all data is loaded from IndexedDB, sync builtin agents again.
+    // STEP 3 runs before IndexedDB data loads (lazySync), so stale agents
+    // from IndexedDB can sneak in. This second sync cleans them up.
+    syncBuiltinAgents();
 
     const elapsed = Date.now() - startTime;
     dbDebug('bgload', `✓ Background load complete (${elapsed}ms)`);
@@ -1324,88 +1415,13 @@ export function initClientDb(): Promise<void> {
       dbDebug('init:2', '✓ All collections marked ready');
 
       // ─────────────────────────────────────────────────────────────────────
-      // STEP 3: Sync builtin agents
+      // STEP 3: Sync builtin agents (first pass - for new users with empty DB)
       // ─────────────────────────────────────────────────────────────────────
+      // NOTE: With lazySync, collection is empty here. This inserts DEFAULT_AGENTS
+      // for new users. For existing users, the real sync happens after background
+      // data load in loadAllCollectionsFromDb() → syncBuiltinAgents().
       dbDebug('init:3', 'Syncing builtin agents...');
-
-      const existingIds = new Set(
-        Array.from(marketAgentsCollection.values())
-          .filter((a) => a.is_builtin === 1)
-          .map((a) => a.id)
-      );
-
-      const defaultIds = new Set(DEFAULT_AGENTS.map((a) => a.id));
-      const newBuiltinAgents = DEFAULT_AGENTS.filter((agent) => !existingIds.has(agent.id));
-
-      if (newBuiltinAgents.length > 0) {
-        const now = new Date().toISOString();
-        marketAgentsCollection.insert(
-          newBuiltinAgents.map((agent) => {
-            const metadata = getAgentMetadata(agent.role);
-            return {
-              ...agent,
-              description: metadata.description,
-              category: metadata.category,
-              tags: metadata.tags,
-              is_builtin: 1,
-              preferred_provider: agent.preferred_provider || 'claude',
-              created_at: now,
-              updated_at: now,
-            };
-          }),
-        );
-        dbDebug('init:3', `✓ Added ${newBuiltinAgents.length} builtin agents`);
-      } else {
-        dbDebug('init:3', '✓ No new builtin agents to add');
-      }
-
-      // Update existing builtin agents to always match DEFAULT_AGENTS definitions
-      const existingBuiltinAgents = DEFAULT_AGENTS.filter((agent) => existingIds.has(agent.id));
-      let updatedCount = 0;
-      for (const agent of existingBuiltinAgents) {
-        const existing = marketAgentsCollection.get(agent.id);
-        if (!existing) continue;
-        const metadata = getAgentMetadata(agent.role);
-        const needsUpdate =
-          existing.role !== agent.role ||
-          existing.name !== agent.name ||
-          existing.avatar !== agent.avatar ||
-          existing.profile_image !== agent.profile_image ||
-          existing.system_prompt !== agent.system_prompt ||
-          existing.can_generate_images !== agent.can_generate_images ||
-          existing.can_log_screenshots !== agent.can_log_screenshots ||
-          existing.description !== metadata.description ||
-          existing.category !== metadata.category ||
-          JSON.stringify(existing.tags) !== JSON.stringify(metadata.tags);
-        if (needsUpdate) {
-          marketAgentsCollection.update(agent.id, (draft) => {
-            draft.role = agent.role;
-            draft.name = agent.name;
-            draft.avatar = agent.avatar;
-            draft.profile_image = agent.profile_image;
-            draft.system_prompt = agent.system_prompt;
-            draft.can_generate_images = agent.can_generate_images;
-            draft.can_log_screenshots = agent.can_log_screenshots;
-            draft.description = metadata.description;
-            draft.category = metadata.category;
-            draft.tags = metadata.tags;
-            draft.updated_at = new Date().toISOString();
-          });
-          updatedCount++;
-        }
-      }
-      if (updatedCount > 0) {
-        dbDebug('init:3', `✓ Updated ${updatedCount} builtin agents to match latest definitions`);
-      }
-
-      // Remove builtin agents that are no longer in DEFAULT_AGENTS
-      const removedIds = Array.from(existingIds).filter((id) => !defaultIds.has(id));
-      if (removedIds.length > 0) {
-        for (const id of removedIds) {
-          marketAgentsCollection.delete(id);
-        }
-        dbDebug('init:3', `✓ Removed ${removedIds.length} obsolete builtin agents`);
-      }
+      syncBuiltinAgents();
 
       // ─────────────────────────────────────────────────────────────────────
       // STEP 4: Restore any emergency writes from previous session
