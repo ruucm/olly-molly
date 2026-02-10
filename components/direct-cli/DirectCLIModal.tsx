@@ -203,7 +203,7 @@ export function DirectCLIModal({ isOpen, onClose, defaultProjectPath }: DirectCL
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="⌨️ Direct CLI" size="full">
+        <Modal isOpen={isOpen} onClose={onClose} title="Chat" size="full">
             <div className="h-full flex flex-col">
                 {/* Status bar when conversation exists */}
                 {conversation && (

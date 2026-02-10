@@ -450,7 +450,7 @@ export default function Dashboard() {
             onClick={() => { setDirectCliModalOpen(true); setMobileMenuOpen(false); }}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
           >
-            ⌨️ CLI
+            Chat
           </button>
           <button
             onClick={() => { setPmModalOpen(true); setMobileMenuOpen(false); }}
@@ -553,7 +553,7 @@ export default function Dashboard() {
               size="sm"
               onClick={() => setDirectCliModalOpen(true)}
             >
-              ⌨️ CLI
+              Chat
             </Button>
             <Button
               variant="ghost"
