@@ -1356,6 +1356,45 @@ export function initClientDb(): Promise<void> {
         dbDebug('init:3', '✓ No new builtin agents to add');
       }
 
+      // Update existing builtin agents to always match DEFAULT_AGENTS definitions
+      const existingBuiltinAgents = DEFAULT_AGENTS.filter((agent) => existingIds.has(agent.id));
+      let updatedCount = 0;
+      for (const agent of existingBuiltinAgents) {
+        const existing = marketAgentsCollection.get(agent.id);
+        if (!existing) continue;
+        const metadata = getAgentMetadata(agent.role);
+        const needsUpdate =
+          existing.role !== agent.role ||
+          existing.name !== agent.name ||
+          existing.avatar !== agent.avatar ||
+          existing.profile_image !== agent.profile_image ||
+          existing.system_prompt !== agent.system_prompt ||
+          existing.can_generate_images !== agent.can_generate_images ||
+          existing.can_log_screenshots !== agent.can_log_screenshots ||
+          existing.description !== metadata.description ||
+          existing.category !== metadata.category ||
+          JSON.stringify(existing.tags) !== JSON.stringify(metadata.tags);
+        if (needsUpdate) {
+          marketAgentsCollection.update(agent.id, (draft) => {
+            draft.role = agent.role;
+            draft.name = agent.name;
+            draft.avatar = agent.avatar;
+            draft.profile_image = agent.profile_image;
+            draft.system_prompt = agent.system_prompt;
+            draft.can_generate_images = agent.can_generate_images;
+            draft.can_log_screenshots = agent.can_log_screenshots;
+            draft.description = metadata.description;
+            draft.category = metadata.category;
+            draft.tags = metadata.tags;
+            draft.updated_at = new Date().toISOString();
+          });
+          updatedCount++;
+        }
+      }
+      if (updatedCount > 0) {
+        dbDebug('init:3', `✓ Updated ${updatedCount} builtin agents to match latest definitions`);
+      }
+
       // Remove builtin agents that are no longer in DEFAULT_AGENTS
       const removedIds = Array.from(existingIds).filter((id) => !defaultIds.has(id));
       if (removedIds.length > 0) {
