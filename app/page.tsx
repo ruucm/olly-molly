@@ -271,7 +271,6 @@ export default function Dashboard() {
     tags: string[];
     can_generate_images: boolean;
     can_log_screenshots: boolean;
-    preferred_provider: 'claude' | 'opencode' | 'codex';
   }) => {
     try {
       marketAgentService.create(data);

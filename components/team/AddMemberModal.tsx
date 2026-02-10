@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
@@ -36,6 +36,29 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
     const [systemPrompt, setSystemPrompt] = useState('');
     const [canGenerateImages, setCanGenerateImages] = useState(false);
     const [canLogScreenshots, setCanLogScreenshots] = useState(false);
+    const [isGenerating, setIsGenerating] = useState(false);
+
+    const handleAIGenerate = useCallback(async () => {
+        if (!name.trim() || isGenerating) return;
+        setIsGenerating(true);
+        try {
+            const res = await fetch('/api/agent/generate-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() }),
+            });
+            const data = await res.json();
+            if (data.success && data.prompt) {
+                setSystemPrompt(data.prompt);
+            } else {
+                console.error('Failed to generate prompt:', data.error);
+            }
+        } catch (err) {
+            console.error('Failed to generate prompt:', err);
+        } finally {
+            setIsGenerating(false);
+        }
+    }, [name, isGenerating]);
 
     const handleTemplateSelect = (emoji: string, prompt: string, roleValue: string) => {
         setSystemPrompt(prompt);
@@ -74,6 +97,7 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
         setSystemPrompt('');
         setCanGenerateImages(false);
         setCanLogScreenshots(false);
+        setIsGenerating(false);
         onClose();
     };
 
@@ -131,9 +155,28 @@ export function AddMemberModal({ isOpen, onClose, onSave }: AddMemberModalProps)
 
                 {/* System Prompt */}
                 <div>
-                    <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
-                        System Prompt *
-                    </label>
+                    <div className="flex items-center justify-between mb-2">
+                        <label className="text-sm font-medium text-[var(--text-primary)]">
+                            System Prompt *
+                        </label>
+                        <button
+                            type="button"
+                            onClick={handleAIGenerate}
+                            disabled={!name.trim() || isGenerating}
+                            className="px-2.5 py-1 text-xs rounded-md bg-[var(--accent-primary)] text-white
+                                     hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed
+                                     transition-opacity flex items-center gap-1.5"
+                        >
+                            {isGenerating ? (
+                                <>
+                                    <span className="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    Generating...
+                                </>
+                            ) : (
+                                'AI Generate'
+                            )}
+                        </button>
+                    </div>
                     <div className="flex flex-wrap gap-2 mb-2">
                         {roleOptions.map((option) => (
                             <button

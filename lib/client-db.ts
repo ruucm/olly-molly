@@ -22,7 +22,6 @@ export interface Member {
   is_default: number;
   can_generate_images: number;
   can_log_screenshots: number;
-  preferred_provider: 'claude' | 'opencode' | 'codex';
   source_market_agent_id: string | null;
   order_index: number;
   created_at: string;
@@ -42,7 +41,6 @@ export interface MarketAgent {
   is_builtin: number;
   can_generate_images: number;
   can_log_screenshots: number;
-  preferred_provider: 'claude' | 'opencode' | 'codex';
   created_at: string;
   updated_at: string;
 }
@@ -1220,7 +1218,6 @@ function syncBuiltinAgents(): void {
         const metadata = getAgentMetadata(agent.role);
         return {
           ...agent,
-          preferred_provider: agent.preferred_provider || 'claude',
           description: metadata.description,
           category: metadata.category,
           tags: metadata.tags,
@@ -1248,7 +1245,6 @@ function syncBuiltinAgents(): void {
       existing.system_prompt !== agent.system_prompt ||
       existing.can_generate_images !== agent.can_generate_images ||
       existing.can_log_screenshots !== agent.can_log_screenshots ||
-      existing.preferred_provider !== (agent.preferred_provider || 'claude') ||
       existing.description !== metadata.description ||
       existing.category !== metadata.category ||
       JSON.stringify(existing.tags) !== JSON.stringify(metadata.tags);
@@ -1261,7 +1257,6 @@ function syncBuiltinAgents(): void {
         draft.system_prompt = agent.system_prompt;
         draft.can_generate_images = agent.can_generate_images;
         draft.can_log_screenshots = agent.can_log_screenshots;
-        draft.preferred_provider = agent.preferred_provider || 'claude';
         draft.description = metadata.description;
         draft.category = metadata.category;
         draft.tags = metadata.tags;
@@ -1547,7 +1542,7 @@ export const memberService = {
     });
     return this.getById(id);
   },
-  update(id: string, data: Partial<Pick<Member, 'name' | 'avatar' | 'profile_image' | 'system_prompt' | 'can_generate_images' | 'can_log_screenshots' | 'preferred_provider'>>): Member | undefined {
+  update(id: string, data: Partial<Pick<Member, 'name' | 'avatar' | 'profile_image' | 'system_prompt' | 'can_generate_images' | 'can_log_screenshots'>>): Member | undefined {
     membersCollection.update(id, (draft) => {
       if (data.name !== undefined) draft.name = data.name;
       if (data.avatar !== undefined) draft.avatar = data.avatar;
@@ -1559,12 +1554,11 @@ export const memberService = {
       if (data.can_log_screenshots !== undefined) {
         draft.can_log_screenshots = data.can_log_screenshots ? 1 : 0;
       }
-      if (data.preferred_provider !== undefined) draft.preferred_provider = data.preferred_provider;
       draft.updated_at = new Date().toISOString();
     });
     return this.getById(id);
   },
-  create(data: { role: string; name: string; avatar?: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean; preferred_provider?: 'claude' | 'opencode' | 'codex' }): Member {
+  create(data: { role: string; name: string; avatar?: string; system_prompt: string; can_generate_images?: boolean; can_log_screenshots?: boolean }): Member {
     const now = new Date().toISOString();
     // Get max order_index to place new member at the end
     const members = Array.from(membersCollection.values());
@@ -1579,7 +1573,6 @@ export const memberService = {
       is_default: 0,
       can_generate_images: data.can_generate_images ? 1 : 0,
       can_log_screenshots: data.can_log_screenshots ? 1 : 0,
-      preferred_provider: data.preferred_provider || 'claude',
       source_market_agent_id: null,
       order_index: maxOrderIndex + 1,
       created_at: now,
@@ -1623,7 +1616,6 @@ export const memberService = {
       is_default: 0,
       can_generate_images: marketAgent.can_generate_images,
       can_log_screenshots: marketAgent.can_log_screenshots,
-      preferred_provider: marketAgent.preferred_provider || 'claude',
       source_market_agent_id: marketAgent.id,
       order_index: maxOrderIndex + 1,
       created_at: now,
@@ -1660,7 +1652,6 @@ export const marketAgentService = {
     tags?: string[];
     can_generate_images?: boolean;
     can_log_screenshots?: boolean;
-    preferred_provider?: 'claude' | 'opencode' | 'codex';
   }): MarketAgent {
     const now = new Date().toISOString();
     const agent: MarketAgent = {
@@ -1676,7 +1667,6 @@ export const marketAgentService = {
       is_builtin: 0,
       can_generate_images: data.can_generate_images ? 1 : 0,
       can_log_screenshots: data.can_log_screenshots ? 1 : 0,
-      preferred_provider: data.preferred_provider || 'claude',
       created_at: now,
       updated_at: now,
     };
@@ -1685,7 +1675,7 @@ export const marketAgentService = {
   },
   update(
     id: string,
-    data: Partial<Pick<MarketAgent, 'name' | 'avatar' | 'profile_image' | 'system_prompt' | 'description' | 'category' | 'tags' | 'can_generate_images' | 'can_log_screenshots' | 'preferred_provider'>>,
+    data: Partial<Pick<MarketAgent, 'name' | 'avatar' | 'profile_image' | 'system_prompt' | 'description' | 'category' | 'tags' | 'can_generate_images' | 'can_log_screenshots'>>,
   ): MarketAgent | undefined {
     const agent = this.getById(id);
     if (!agent) return undefined;
@@ -1706,7 +1696,6 @@ export const marketAgentService = {
       if (data.can_log_screenshots !== undefined) {
         draft.can_log_screenshots = data.can_log_screenshots ? 1 : 0;
       }
-      if (data.preferred_provider !== undefined) draft.preferred_provider = data.preferred_provider;
       draft.updated_at = new Date().toISOString();
     });
     return this.getById(id);

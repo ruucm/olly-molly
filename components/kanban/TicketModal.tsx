@@ -29,7 +29,6 @@ interface Member {
     is_default: number;
     can_generate_images: number;
     can_log_screenshots: number;
-    preferred_provider?: 'claude' | 'opencode' | 'codex';
 }
 
 interface Ticket {
@@ -152,15 +151,6 @@ export function TicketModal({ isOpen, onClose, ticket, members, onSave, onDelete
             }
         }
     }, [ticket]);
-
-    // Auto-set provider from assigned agent's preferred_provider
-    useEffect(() => {
-        if (selectedAssigneeIds.length === 0) return;
-        const firstAssignee = members.find((m) => m.id === selectedAssigneeIds[0]);
-        if (firstAssignee?.preferred_provider) {
-            setProvider(firstAssignee.preferred_provider);
-        }
-    }, [selectedAssigneeIds, members]);
 
     // Poll for job status when executing
     useEffect(() => {

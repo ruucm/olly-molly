@@ -8,7 +8,6 @@ export interface AgentDefinition {
   is_default: number;
   can_generate_images: number;
   can_log_screenshots: number;
-  preferred_provider?: 'claude' | 'opencode' | 'codex';
 }
 
 export type AgentCategory = 'management' | 'development' | 'testing' | 'operations' | 'custom';
