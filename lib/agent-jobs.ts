@@ -1,7 +1,8 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync, exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import net from 'net';
+import https from 'https';
 import { addMessage, completeConversation, addDirectCliMessage, completeDirectCliConversation } from './server-store';
 
 // ─── Global Error Handlers for Debugging ─────────────────────────────
@@ -36,6 +37,317 @@ if (typeof process !== 'undefined') {
 }
 
 export type AgentProvider = 'claude' | 'opencode' | 'codex';
+
+// ─── OAuth Token (Keychain → file → env) ─────────────────────────────
+
+function readClaudeCodeToken(): string | null {
+    try {
+        const result = execSync(
+            'security find-generic-password -s "Claude Code-credentials" -w',
+            { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        const data = JSON.parse(result.trim());
+        if (data?.claudeAiOauth?.accessToken) {
+            return data.claudeAiOauth.accessToken;
+        }
+    } catch {}
+
+    try {
+        const credPath = path.join(process.env.HOME || '~', '.claude', '.credentials.json');
+        const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+        if (raw?.claudeAiOauth?.accessToken) {
+            return raw.claudeAiOauth.accessToken;
+        }
+    } catch {}
+
+    return process.env.ANTHROPIC_API_KEY || null;
+}
+
+// ─── Tool Definitions (sent to Claude API) ───────────────────────────
+
+const AGENT_TOOLS = [
+    {
+        name: 'read_file',
+        description: 'Read the contents of a file at the given path.',
+        input_schema: {
+            type: 'object' as const,
+            properties: {
+                path: { type: 'string', description: 'File path to read (absolute or relative to project root)' },
+            },
+            required: ['path'],
+        },
+    },
+    {
+        name: 'write_file',
+        description: 'Write content to a file, replacing its entire contents. Creates parent directories if needed.',
+        input_schema: {
+            type: 'object' as const,
+            properties: {
+                path: { type: 'string', description: 'File path to write' },
+                content: { type: 'string', description: 'Full file content to write' },
+            },
+            required: ['path', 'content'],
+        },
+    },
+    {
+        name: 'edit_file',
+        description: 'Replace an exact string in a file with new content. The old_string must match exactly (including whitespace and indentation).',
+        input_schema: {
+            type: 'object' as const,
+            properties: {
+                path: { type: 'string', description: 'File path to edit' },
+                old_string: { type: 'string', description: 'Exact string to find in the file' },
+                new_string: { type: 'string', description: 'String to replace it with' },
+            },
+            required: ['path', 'old_string', 'new_string'],
+        },
+    },
+    {
+        name: 'list_files',
+        description: 'List files and directories in a given path.',
+        input_schema: {
+            type: 'object' as const,
+            properties: {
+                path: { type: 'string', description: 'Directory path to list' },
+            },
+            required: ['path'],
+        },
+    },
+    {
+        name: 'bash',
+        description: 'Execute a shell command. Use this for git, npm, running dev servers, testing, and any other CLI operations. Commands run in the project root directory.',
+        input_schema: {
+            type: 'object' as const,
+            properties: {
+                command: { type: 'string', description: 'Shell command to execute' },
+                timeout: { type: 'number', description: 'Timeout in milliseconds (default: 120000)' },
+            },
+            required: ['command'],
+        },
+    },
+];
+
+// ─── Tool Execution ──────────────────────────────────────────────────
+
+function resolvePath(filePath: string, projectPath: string): string {
+    if (path.isAbsolute(filePath)) return filePath;
+    return path.resolve(projectPath, filePath);
+}
+
+async function executeTool(
+    name: string,
+    input: Record<string, unknown>,
+    projectPath: string,
+    env?: Record<string, string | undefined>
+): Promise<{ content: string }> {
+    try {
+        switch (name) {
+            case 'read_file': {
+                const filePath = resolvePath(input.path as string, projectPath);
+                const content = fs.readFileSync(filePath, 'utf-8');
+                return { content };
+            }
+            case 'write_file': {
+                const filePath = resolvePath(input.path as string, projectPath);
+                const dir = path.dirname(filePath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(filePath, input.content as string, 'utf-8');
+                return { content: `File written: ${filePath} (${(input.content as string).length} chars)` };
+            }
+            case 'edit_file': {
+                const filePath = resolvePath(input.path as string, projectPath);
+                const fileContent = fs.readFileSync(filePath, 'utf-8');
+                const oldStr = input.old_string as string;
+                if (!fileContent.includes(oldStr)) {
+                    return { content: `Error: String not found in file. The old_string must match exactly (including whitespace).` };
+                }
+                const newContent = fileContent.replace(oldStr, input.new_string as string);
+                fs.writeFileSync(filePath, newContent, 'utf-8');
+                return { content: `Edit applied to ${filePath}` };
+            }
+            case 'list_files': {
+                const dirPath = resolvePath(input.path as string, projectPath);
+                const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+                const list = entries.map(e => (e.isDirectory() ? e.name + '/' : e.name));
+                return { content: list.join('\n') };
+            }
+            case 'bash': {
+                const command = input.command as string;
+                const timeout = (input.timeout as number) || 120000;
+
+                // For background commands (ending with &), use nohup + redirect
+                // so the child process is fully detached and doesn't block
+                const isBackground = /&\s*$/.test(command.trim());
+                const actualCommand = isBackground
+                    ? `nohup bash -c ${JSON.stringify(command.replace(/&\s*$/, ''))} > /dev/null 2>&1 & echo "Background process started (pid: $!)"`
+                    : command;
+
+                return new Promise((resolve) => {
+                    exec(actualCommand, {
+                        cwd: projectPath,
+                        timeout: isBackground ? 10000 : timeout,
+                        maxBuffer: 10 * 1024 * 1024,
+                        env: { ...process.env, ...env } as NodeJS.ProcessEnv,
+                    }, (error, stdout, stderr) => {
+                        const parts: string[] = [];
+                        if (stdout) parts.push(stdout.toString());
+                        if (stderr) parts.push(`stderr: ${stderr.toString()}`);
+                        if (error && error.killed) parts.push(`(command timed out after ${timeout}ms)`);
+                        else if (error) parts.push(`exit code: ${error.code}`);
+                        resolve({ content: parts.join('\n') || '(no output)' });
+                    });
+                });
+            }
+            default:
+                return { content: `Error: Unknown tool: ${name}` };
+        }
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { content: `Error: ${msg}` };
+    }
+}
+
+// ─── Anthropic API Call ──────────────────────────────────────────────
+
+interface AnthropicResponse {
+    content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
+    stop_reason: string;
+    error?: { message: string };
+}
+
+function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse> {
+    return new Promise((resolve, reject) => {
+        const isOAuth = apiKey.includes('sk-ant-oat');
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'anthropic-version': '2023-06-01',
+        };
+        if (isOAuth) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+            headers['anthropic-beta'] = 'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14';
+        } else {
+            headers['x-api-key'] = apiKey;
+        }
+
+        const postData = Buffer.from(JSON.stringify(body), 'utf-8');
+        headers['Content-Length'] = String(postData.length);
+
+        const req = https.request({
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers,
+        }, (res) => {
+            let data = '';
+            res.on('data', (chunk: Buffer) => data += chunk.toString());
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch {
+                    reject(new Error(`API parse error: ${data.slice(0, 300)}`));
+                }
+            });
+        });
+        req.on('error', reject);
+        req.write(postData);
+        req.end();
+    });
+}
+
+// ─── Agent Loop (Tool Use Loop) ──────────────────────────────────────
+
+const MAX_AGENT_TURNS = 30;
+
+interface AgentLoopCallbacks {
+    onTurn: (turn: number) => void;
+    onTool: (name: string, input: string) => void;
+    onText: (text: string) => void;
+}
+
+async function runAgentLoop(
+    apiKey: string,
+    systemPrompt: string,
+    userPrompt: string,
+    projectPath: string,
+    callbacks: AgentLoopCallbacks,
+    env?: Record<string, string | undefined>,
+    abortSignal?: { aborted: boolean },
+): Promise<{ summary: string; turns: number }> {
+    const model = getConfiguredModel('claude') || 'claude-sonnet-4-20250514';
+    const messages: Array<{ role: string; content: unknown }> = [
+        { role: 'user', content: userPrompt },
+    ];
+
+    for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
+        if (abortSignal?.aborted) {
+            return { summary: 'Job was cancelled', turns: turn };
+        }
+
+        callbacks.onTurn(turn + 1);
+
+        const response = await callAnthropic(apiKey, {
+            model,
+            max_tokens: 16384,
+            system: systemPrompt,
+            tools: AGENT_TOOLS,
+            messages,
+        });
+
+        if (response.error) {
+            throw new Error(response.error.message);
+        }
+
+        // Add assistant response to messages
+        messages.push({ role: 'assistant', content: response.content });
+
+        // Extract text blocks for streaming
+        const textBlocks = response.content.filter(b => b.type === 'text');
+        for (const block of textBlocks) {
+            if (block.text) callbacks.onText(block.text);
+        }
+
+        // Check for tool_use blocks
+        const toolUses = response.content.filter(b => b.type === 'tool_use');
+
+        if (toolUses.length === 0) {
+            // No tool calls → final response
+            const finalText = textBlocks.map(b => b.text || '').join('\n');
+            return { summary: finalText, turns: turn + 1 };
+        }
+
+        // Execute tools and collect results
+        const toolResults: Array<{ type: string; tool_use_id: string; content: string }> = [];
+        for (const toolUse of toolUses) {
+            const inputSummary = toolUse.name === 'bash'
+                ? (toolUse.input?.command as string || '').slice(0, 100)
+                : (toolUse.input?.path as string || '');
+            callbacks.onTool(toolUse.name!, inputSummary);
+
+            const result = await executeTool(
+                toolUse.name!,
+                toolUse.input || {},
+                projectPath,
+                env as Record<string, string | undefined>,
+            );
+
+            toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id!,
+                content: result.content,
+            });
+        }
+
+        messages.push({ role: 'user', content: toolResults });
+
+        // If stop_reason is end_turn (not tool_use), we're done
+        if (response.stop_reason === 'end_turn') {
+            const finalText = textBlocks.map(b => b.text || '').join('\n');
+            return { summary: finalText || 'Task completed', turns: turn + 1 };
+        }
+    }
+
+    return { summary: `Reached max turns (${MAX_AGENT_TURNS})`, turns: MAX_AGENT_TURNS };
+}
 
 const CLAUDE_CMD = 'claude';
 const OPENCODE_CMD = 'opencode';
@@ -159,7 +471,8 @@ interface RunningJob {
     projectPath: string;
     provider: AgentProvider;
     startedAt: Date;
-    process: ChildProcess;
+    process?: ChildProcess;       // CLI-based jobs
+    abortSignal?: { aborted: boolean }; // API-based jobs
     output: string;
     status: 'running' | 'completed' | 'failed';
 }
@@ -506,8 +819,158 @@ interface StartJobParams {
     provider: AgentProvider;
 }
 
+// ─── API-based Job Runner (for Claude provider) ─────────────────────
+
+async function startClaudeApiJob(params: StartJobParams): Promise<void> {
+    const { jobId, conversationId, ticketId, ticketTitle, agentId, agentName, agentAvatar, projectPath, prompt } = params;
+
+    console.log(`[agent-jobs:api] Starting API-based job: ${jobId}`);
+    console.log(`[agent-jobs:api]   ticket: ${ticketTitle} (${ticketId})`);
+    console.log(`[agent-jobs:api]   agent: ${agentName} (${agentId})`);
+    console.log(`[agent-jobs:api]   project: ${projectPath}`);
+    logDebugState('api-job-start');
+    startDebugInterval();
+
+    const availablePort = await findAvailablePort(3001);
+    console.log(`[agent-jobs:api] Found available port: ${availablePort}`);
+
+    const apiKey = readClaudeCodeToken();
+    if (!apiKey) {
+        throw new Error('Claude Code 인증 토큰을 찾을 수 없습니다. Keychain, ~/.claude/.credentials.json, 또는 ANTHROPIC_API_KEY 환경변수를 확인하세요.');
+    }
+
+    const modelLabel = getConfiguredModel('claude') || 'claude-sonnet-4-20250514';
+    const startMessage = `🚀 Starting Claude API agent in ${projectPath}...\nModel: ${modelLabel}\n\n`;
+
+    const abortSignal = { aborted: false };
+
+    const job: RunningJob = {
+        id: jobId,
+        conversationId,
+        ticketId,
+        agentId,
+        agentName,
+        projectPath,
+        provider: 'claude',
+        startedAt: new Date(),
+        abortSignal,
+        output: startMessage,
+        status: 'running',
+    };
+
+    runningJobs.set(jobId, job);
+
+    // Build env for bash tool
+    const agentEnv: Record<string, string | undefined> = {
+        AVAILABLE_PORT: String(availablePort),
+        DEV_PORT: String(availablePort),
+        PORT: String(availablePort),
+    };
+
+    // Build system prompt
+    const safetyInstructions = PORT_SAFETY_INSTRUCTIONS.replace(/\$AVAILABLE_PORT/g, String(availablePort));
+    const systemPrompt = `You are a coding agent that completes development tasks. You have tools to read, write, and edit files, list directories, and execute shell commands (bash).
+
+${safetyInstructions}
+
+IMPORTANT RULES:
+1. Always read relevant files before making changes.
+2. Use edit_file for precise changes (preferred over write_file for existing files).
+3. Use bash for git commands, package management, running tests, starting dev servers, etc.
+4. After completing all changes, create a git commit with a descriptive message.
+5. Provide a brief summary of what you did when finished.
+6. Your assigned dev port is ${availablePort}. Use it for any dev servers.
+7. Before finishing, stop any dev servers you started on port ${availablePort}.`;
+
+    // Fire and forget the agent loop
+    (async () => {
+        try {
+            const result = await runAgentLoop(
+                apiKey,
+                systemPrompt,
+                prompt,
+                projectPath,
+                {
+                    onTurn: (turn) => {
+                        console.log(`[agent-jobs:api] Turn ${turn} for job ${jobId}`);
+                    },
+                    onTool: (name, input) => {
+                        const logMsg = `[tool] ${name}: ${input}\n`;
+                        job.output += logMsg;
+                        addMessage(conversationId, logMsg, 'log');
+                    },
+                    onText: (text) => {
+                        job.output += text;
+                        addMessage(conversationId, text, 'log');
+                    },
+                },
+                agentEnv,
+                abortSignal,
+            );
+
+            // Extract commit hash from output
+            const commitMatch = job.output.match(/commit\s+([a-f0-9]{7,40})/i);
+            const commitHash = commitMatch ? commitMatch[1] : undefined;
+
+            job.status = 'completed';
+            console.log(`[agent-jobs:api] Job ${jobId} completed. Turns: ${result.turns}, commit: ${commitHash || 'none'}`);
+            logDebugState('api-job-complete');
+
+            completeConversation(conversationId, {
+                status: 'completed',
+                git_commit_hash: commitHash,
+            });
+            addMessage(
+                conversationId,
+                `✅ Task completed successfully${commitHash ? ` (commit: ${commitHash})` : ''}`,
+                'success',
+            );
+
+            appendToWorkLog(projectPath, {
+                agentName,
+                agentAvatar: agentAvatar || '🤖',
+                ticketTitle: ticketTitle || 'Unknown Task',
+                success: true,
+                commitHash,
+                output: job.output,
+            });
+
+            cleanupAttachments(projectPath, ticketId);
+
+            setTimeout(() => { runningJobs.delete(jobId); }, 60000);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[agent-jobs:api] Job ${jobId} failed:`, errorMessage);
+            logDebugState('api-job-error');
+
+            job.status = 'failed';
+            job.output += `\n[error] ${errorMessage}`;
+
+            completeConversation(conversationId, { status: 'failed' });
+            addMessage(conversationId, `❌ Task failed: ${errorMessage}`, 'error');
+
+            appendToWorkLog(projectPath, {
+                agentName,
+                agentAvatar: agentAvatar || '🤖',
+                ticketTitle: ticketTitle || 'Unknown Task',
+                success: false,
+                output: job.output,
+            });
+
+            cleanupAttachments(projectPath, ticketId);
+
+            setTimeout(() => { runningJobs.delete(jobId); }, 60000);
+        }
+    })();
+}
+
 export async function startBackgroundJob(params: StartJobParams): Promise<void> {
     const { jobId, conversationId, ticketId, ticketTitle, agentId, agentName, agentAvatar, projectPath, prompt: originalPrompt, provider } = params;
+
+    // Use direct API for Claude provider
+    if (provider === 'claude') {
+        return startClaudeApiJob(params);
+    }
 
     // Debug: Log job start with current state
     console.log(`[agent-jobs] Starting job: ${jobId}`);
@@ -946,7 +1409,14 @@ export function cancelJob(jobId: string): boolean {
         return false;
     }
 
-    job.process.kill('SIGTERM');
+    // Cancel API-based or process-based job
+    if (job.abortSignal) {
+        job.abortSignal.aborted = true;
+    }
+    if (job.process) {
+        job.process.kill('SIGTERM');
+    }
+
     job.status = 'failed';
     job.output += '\n[cancelled] Job was cancelled by user';
 
@@ -968,7 +1438,8 @@ interface DirectCliJob {
     projectPath: string;
     provider: AgentProvider;
     startedAt: Date;
-    process: ChildProcess;
+    process?: ChildProcess;
+    abortSignal?: { aborted: boolean };
     output: string;
     status: 'running' | 'completed' | 'failed';
 }
@@ -1017,6 +1488,70 @@ interface StartDirectCliJobParams {
 export async function startDirectCliJob(params: StartDirectCliJobParams): Promise<void> {
     const { jobId, conversationId, projectPath, prompt, provider } = params;
 
+    // Use direct API for Claude provider
+    if (provider === 'claude') {
+        console.log(`[agent-jobs:api] Starting DirectCLI API job: ${jobId}`);
+
+        const apiKey = readClaudeCodeToken();
+        if (!apiKey) {
+            throw new Error('Claude Code 인증 토큰을 찾을 수 없습니다.');
+        }
+
+        const availablePort = await findAvailablePort(3001);
+        const modelLabel = getConfiguredModel('claude') || 'claude-sonnet-4-20250514';
+        const abortSignal = { aborted: false };
+
+        const job: DirectCliJob = {
+            id: jobId,
+            conversationId,
+            projectPath,
+            provider: 'claude',
+            startedAt: new Date(),
+            abortSignal,
+            output: `🚀 Starting Claude API agent in ${projectPath}...\nModel: ${modelLabel}\n\n`,
+            status: 'running',
+        };
+        directCliJobs.set(jobId, job);
+
+        const systemPrompt = `You are a coding agent. You have tools to read, write, edit files, list directories, and execute shell commands. Complete the task and provide a brief summary.`;
+        const agentEnv: Record<string, string | undefined> = {
+            AVAILABLE_PORT: String(availablePort),
+            DEV_PORT: String(availablePort),
+            PORT: String(availablePort),
+        };
+
+        (async () => {
+            try {
+                const result = await runAgentLoop(apiKey, systemPrompt, prompt, projectPath, {
+                    onTurn: (turn) => console.log(`[agent-jobs:api] DirectCLI turn ${turn}`),
+                    onTool: (name, input) => {
+                        const msg = `[tool] ${name}: ${input}\n`;
+                        job.output += msg;
+                        addDirectCliMessage(conversationId, msg, 'log');
+                    },
+                    onText: (text) => {
+                        job.output += text;
+                        addDirectCliMessage(conversationId, text, 'log');
+                    },
+                }, agentEnv, abortSignal);
+
+                job.status = 'completed';
+                completeDirectCliConversation(conversationId, { status: 'completed' });
+                addDirectCliMessage(conversationId, '✅ Execution completed successfully', 'success');
+                setTimeout(() => { directCliJobs.delete(jobId); }, 60000);
+            } catch (error: unknown) {
+                const msg = error instanceof Error ? error.message : String(error);
+                job.status = 'failed';
+                job.output += `\n[error] ${msg}`;
+                completeDirectCliConversation(conversationId, { status: 'failed' });
+                addDirectCliMessage(conversationId, `❌ Execution failed: ${msg}`, 'error');
+                setTimeout(() => { directCliJobs.delete(jobId); }, 60000);
+            }
+        })();
+
+        return;
+    }
+
     console.log(`[agent-jobs] Starting DirectCLI job: ${jobId}`);
     console.log(`[agent-jobs]   project: ${projectPath}`);
     console.log(`[agent-jobs]   provider: ${provider}`);
@@ -1044,9 +1579,9 @@ export async function startDirectCliJob(params: StartDirectCliJobParams): Promis
         useStdin = codex.useStdin;
         startMessage = `🚀 Starting Codex CLI in ${projectPath}...\nModel: ${modelLabel}\n\n`;
     } else {
-        execPath = CLAUDE_CMD;
-        args = CLAUDE_STREAM_ARGS;
-        startMessage = `🚀 Starting Claude Code in ${projectPath}...\nModel: ${modelLabel}\n\n`;
+        execPath = OPENCODE_CMD; // fallback (shouldn't reach here)
+        args = [...OPENCODE_STREAM_ARGS, '-'];
+        startMessage = `🚀 Starting in ${projectPath}...\nModel: ${modelLabel}\n\n`;
     }
 
     const isWindows = process.platform === 'win32';
@@ -1325,7 +1860,13 @@ export function cancelDirectCliJob(jobId: string): boolean {
         return false;
     }
 
-    job.process.kill('SIGTERM');
+    if (job.abortSignal) {
+        job.abortSignal.aborted = true;
+    }
+    if (job.process) {
+        job.process.kill('SIGTERM');
+    }
+
     job.status = 'failed';
     job.output += '\n[cancelled] Job was cancelled by user';
 
