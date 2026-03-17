@@ -262,7 +262,8 @@ async function handleExportDb(exportPath, config) {
         }
 
         // Create tar.gz
-        execSync(`tar -czf "${absPath}" -C "${tmpDir}" .`, { stdio: 'pipe' });
+        const forceLocal = process.platform === 'win32' ? ' --force-local' : '';
+        execSync(`tar -czf "${absPath}" -C "${tmpDir}" .${forceLocal}`, { stdio: 'pipe' });
         console.log(`✅ Database exported to: ${absPath}`);
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -301,7 +302,8 @@ async function handleImportDb(importPath, config) {
         // Extract to temp dir first to validate
         const tmpDir = path.join(os.tmpdir(), `olly-molly-import-${Date.now()}`);
         fs.mkdirSync(tmpDir, { recursive: true });
-        execSync(`tar -xzf "${absPath}" -C "${tmpDir}"`, { stdio: 'pipe' });
+        const forceLocal2 = process.platform === 'win32' ? ' --force-local' : '';
+        execSync(`tar -xzf "${absPath}" -C "${tmpDir}"${forceLocal2}`, { stdio: 'pipe' });
 
         // Check if valid export
         const hasDb = fs.existsSync(path.join(tmpDir, 'db'));
@@ -462,7 +464,8 @@ function download(url, destDir, { allowNotFound = false, stripComponents = 1 } =
                     file.close();
                     fs.mkdirSync(destDir, { recursive: true });
                     const stripArg = stripComponents > 0 ? ` --strip-components=${stripComponents}` : '';
-                    execSync(`tar -xzf "${tmp}" -C "${destDir}"${stripArg}`, { stdio: 'pipe' });
+                    const forceLocal = process.platform === 'win32' ? ' --force-local' : '';
+                    execSync(`tar -xzf "${tmp}" -C "${destDir}"${stripArg}${forceLocal}`, { stdio: 'pipe' });
                     fs.unlinkSync(tmp);
                     resolve(true);
                 });

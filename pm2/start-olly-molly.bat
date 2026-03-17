@@ -1,6 +1,10 @@
 @echo off
 setlocal
 
+REM 0) stop existing pm2 processes before update
+call pm2 stop all 2>nul
+call pm2 delete all 2>nul
+
 REM 1) update
 call npx -y olly-molly@latest --update-only
 
