@@ -85,6 +85,7 @@ export default function Dashboard() {
   const [emailChecked, setEmailChecked] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [agentConfig, setAgentConfig] = useState<{ token: { source: string; preview: string }; model: { id: string; label: string } } | null>(null);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
@@ -125,6 +126,14 @@ export default function Dashboard() {
   }, [allTickets, activeProjectId, membersById]);
 
 
+
+  // Fetch agent config on mount
+  useEffect(() => {
+    fetch('/api/agent/config')
+      .then(res => res.json())
+      .then(data => setAgentConfig(data))
+      .catch(() => {});
+  }, []);
 
   // Check for CLI tools on mount
   useEffect(() => {
@@ -499,6 +508,21 @@ export default function Dashboard() {
             <span className="text-[10px] text-[var(--text-muted)] hidden lg:inline" title={`Version ${appVersion}`}>
               v{appVersion}
             </span>
+            {agentConfig && (
+              <span
+                className="hidden lg:inline-flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] bg-[var(--bg-secondary)] px-2 py-0.5 rounded-full"
+                title={`Token: ${agentConfig.token.source} (${agentConfig.token.preview})\nModel: ${agentConfig.model.id}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${agentConfig.token.source === 'none' ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                {agentConfig.model.label}
+                <span className="opacity-50">·</span>
+                <span className="opacity-70">
+                  {agentConfig.token.source === 'keychain' ? 'Keychain' :
+                   agentConfig.token.source === 'env' ? '.env' :
+                   agentConfig.token.source === 'credentials' ? 'Credentials' : 'No Key'}
+                </span>
+              </span>
+            )}
             {runningCount > 0 && (
               <span className="flex items-center gap-1.5 text-xs text-[var(--status-progress-text)]">
                 <span className="w-1.5 h-1.5 bg-[var(--status-progress-text)] rounded-full gentle-pulse" />
