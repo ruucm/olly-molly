@@ -31,6 +31,7 @@ const CLI_OPTIONS = {
     'export-db': { type: 'string' },
     'import-db': { type: 'string' },
     'update-only': { type: 'boolean', default: false },
+    setup: { type: 'boolean', default: false },
 };
 
 // Parse CLI arguments
@@ -75,6 +76,7 @@ DEVELOPMENT
   -v, --verbose           Enable verbose logging
 
 ADVANCED OPTIONS
+      --setup             Configure API key and model
       --reset             Reset all app data (with confirmation)
       --export-db <path>  Export database to zip file
       --import-db <path>  Import database from zip file
@@ -183,6 +185,236 @@ function getConfig() {
         DEV_MODE: args.dev,
         VERBOSE: args.verbose,
     };
+}
+
+// ─── Setup: API Key & Model Selection ──────────────────────────────
+
+const AVAILABLE_MODELS = [
+    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (default, fast & capable)' },
+    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 (most capable, slower)' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (latest sonnet)' },
+    { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (fastest, cheapest)' },
+];
+
+function readEnvFile(envPath) {
+    const vars = {};
+    if (!fs.existsSync(envPath)) return vars;
+    try {
+        const content = fs.readFileSync(envPath, 'utf8');
+        for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const eqIndex = trimmed.indexOf('=');
+            if (eqIndex === -1) continue;
+            const key = trimmed.slice(0, eqIndex).trim();
+            let value = trimmed.slice(eqIndex + 1).trim();
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+            }
+            vars[key] = value;
+        }
+    } catch {}
+    return vars;
+}
+
+function writeEnvFile(envPath, vars) {
+    // Preserve existing entries, update/add new ones
+    const existing = readEnvFile(envPath);
+    const merged = { ...existing, ...vars };
+    const lines = Object.entries(merged)
+        .filter(([, v]) => v !== undefined && v !== '')
+        .map(([k, v]) => `${k}=${v}`);
+    fs.mkdirSync(path.dirname(envPath), { recursive: true });
+    fs.writeFileSync(envPath, lines.join('\n') + '\n', 'utf8');
+}
+
+function promptInput(question) {
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise((resolve) => {
+        rl.question(question, (answer) => {
+            rl.close();
+            resolve(answer.trim());
+        });
+    });
+}
+
+async function validateApiKey(apiKey) {
+    return new Promise((resolve) => {
+        const isOAuth = apiKey.includes('sk-ant-oat');
+        const headers = {
+            'Content-Type': 'application/json',
+            'anthropic-version': '2023-06-01',
+        };
+        if (isOAuth) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+            headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14';
+            headers['user-agent'] = 'claude-cli/2.1.75';
+            headers['x-app'] = 'cli';
+        } else {
+            headers['x-api-key'] = apiKey;
+        }
+
+        const body = JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 10,
+            ...(isOAuth ? {
+                system: [{ type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }],
+            } : {}),
+            messages: [{ role: 'user', content: 'hi' }],
+        });
+        headers['Content-Length'] = String(Buffer.byteLength(body));
+
+        const req = https.request({
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers,
+        }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk.toString());
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    resolve({ valid: true });
+                } else {
+                    try {
+                        const parsed = JSON.parse(data);
+                        resolve({ valid: false, error: parsed.error?.message || `HTTP ${res.statusCode}` });
+                    } catch {
+                        resolve({ valid: false, error: `HTTP ${res.statusCode}` });
+                    }
+                }
+            });
+        });
+        req.on('error', (err) => resolve({ valid: false, error: err.message }));
+        req.write(body);
+        req.end();
+    });
+}
+
+function tryReadKeychainToken() {
+    try {
+        const result = require('child_process').execSync(
+            'security find-generic-password -s "Claude Code-credentials" -w',
+            { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        const data = JSON.parse(result.trim());
+        if (data?.claudeAiOauth?.accessToken) {
+            return data.claudeAiOauth.accessToken;
+        }
+    } catch {}
+    return null;
+}
+
+async function handleSetup(dataDir) {
+    const envPath = path.join(dataDir, '.env');
+    const existing = readEnvFile(envPath);
+
+    console.log('⚙️  Olly Molly Setup\n');
+
+    // ── Step 1: API Key ──
+    const currentKey = existing.ANTHROPIC_API_KEY || '';
+    const keychainToken = tryReadKeychainToken();
+
+    if (currentKey) {
+        const preview = currentKey.slice(0, 15) + '...' + currentKey.slice(-4);
+        console.log(`  Current API key: ${preview}`);
+    }
+
+    const keyOptions = [];
+    if (keychainToken) {
+        const preview = keychainToken.slice(0, 15) + '...' + keychainToken.slice(-4);
+        keyOptions.push({ key: keychainToken, label: `Claude Code (Keychain): ${preview}` });
+    }
+
+    let selectedKey = currentKey;
+
+    if (keyOptions.length > 0) {
+        console.log('\n  Available API keys:');
+        keyOptions.forEach((opt, i) => {
+            console.log(`    ${i + 1}) ${opt.label}`);
+        });
+        console.log(`    ${keyOptions.length + 1}) Enter a new API key manually`);
+        if (currentKey) {
+            console.log(`    ${keyOptions.length + 2}) Keep current key`);
+        }
+
+        const choice = await promptInput(`\n  Select [1${currentKey ? `-${keyOptions.length + 2}` : `-${keyOptions.length + 1}`}]: `);
+        const choiceNum = parseInt(choice, 10);
+
+        if (choiceNum >= 1 && choiceNum <= keyOptions.length) {
+            selectedKey = keyOptions[choiceNum - 1].key;
+        } else if (choiceNum === keyOptions.length + 1) {
+            selectedKey = await promptInput('  Enter API key (sk-ant-...): ');
+        }
+        // else keep current
+    } else {
+        if (!currentKey) {
+            console.log('  No API key found.\n');
+            console.log('  You can get one from:');
+            console.log('    - https://console.anthropic.com/settings/keys (API key)');
+            console.log('    - Claude Code login (OAuth token from Keychain)\n');
+        }
+        selectedKey = await promptInput(`  Enter API key${currentKey ? ' (Enter to keep current)' : ''}: `) || currentKey;
+    }
+
+    if (!selectedKey) {
+        console.log('\n  ❌ No API key provided. Setup cancelled.');
+        return false;
+    }
+
+    // Validate the key
+    process.stdout.write('  Validating API key... ');
+    const validation = await validateApiKey(selectedKey);
+    if (validation.valid) {
+        console.log('✅');
+    } else {
+        console.log(`❌ ${validation.error}`);
+        const proceed = await promptInput('  Continue anyway? (y/N): ');
+        if (proceed.toLowerCase() !== 'y') {
+            console.log('  Setup cancelled.');
+            return false;
+        }
+    }
+
+    // ── Step 2: Model Selection ──
+    const currentModel = existing.CLAUDE_MODEL || '';
+
+    console.log('\n  Select a model:\n');
+    AVAILABLE_MODELS.forEach((m, i) => {
+        const current = currentModel === m.id ? ' (current)' : '';
+        console.log(`    ${i + 1}) ${m.label}${current}`);
+    });
+
+    const defaultIdx = currentModel
+        ? AVAILABLE_MODELS.findIndex(m => m.id === currentModel) + 1
+        : 1;
+    const modelChoice = await promptInput(`\n  Select [1-${AVAILABLE_MODELS.length}] (default: ${defaultIdx}): `);
+    const modelIdx = (parseInt(modelChoice, 10) || defaultIdx) - 1;
+    const selectedModel = AVAILABLE_MODELS[Math.max(0, Math.min(modelIdx, AVAILABLE_MODELS.length - 1))];
+
+    // ── Save ──
+    writeEnvFile(envPath, {
+        ANTHROPIC_API_KEY: selectedKey,
+        CLAUDE_MODEL: selectedModel.id,
+    });
+
+    console.log(`\n  ✅ Saved to ${envPath}`);
+    console.log(`     API Key: ${selectedKey.slice(0, 15)}...${selectedKey.slice(-4)}`);
+    console.log(`     Model:   ${selectedModel.label}\n`);
+    return true;
+}
+
+function needsSetup(dataDir) {
+    const envPath = path.join(dataDir, '.env');
+    const vars = readEnvFile(envPath);
+    // Need setup if no API key configured anywhere
+    if (vars.ANTHROPIC_API_KEY) return false;
+    if (process.env.ANTHROPIC_API_KEY) return false;
+    // Check keychain as last resort
+    if (tryReadKeychainToken()) return false;
+    return true;
 }
 
 // Verbose logging utility
@@ -565,6 +797,23 @@ async function main() {
     verbose(config, `  DB_DIR: ${config.DB_DIR}`);
     verbose(config, `  PORT: ${config.PORT}`);
     verbose(config, `  HOST: ${config.HOST}`);
+
+    // Handle --setup
+    if (args.setup) {
+        await handleSetup(config.APP_DIR);
+        process.exit(0);
+    }
+
+    // Auto-setup on first run if no API key is configured
+    if (needsSetup(config.APP_DIR)) {
+        console.log('  No API key configured. Running setup...\n');
+        const ok = await handleSetup(config.APP_DIR);
+        if (!ok) {
+            console.log('  You can run setup later with: olly-molly --setup\n');
+        }
+        // Reload env after setup
+        loadEnvFile(config.APP_DIR);
+    }
 
     // Handle mutually exclusive operations
     if (args.reset) {
