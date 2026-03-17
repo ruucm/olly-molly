@@ -299,21 +299,22 @@ npm run dev
 ### Releasing a New Version
 
 ```bash
-scripts/build-prebuilt-macos.sh
-```
-
-```bash
-npm version major|minor|patch
-npm publish
+npm version major|minor|patch (or edit package.json)
 ```
 
 ```bash
 git push origin main
 ```
 
+
 ```bash
-gh release create v0.2.21 \
-  dist/prebuilt/olly-molly-darwin-arm64.tar.gz \
+scripts/build-prebuilt-macos.sh
+npm publish
+```
+
+
+```bash
+gh release create v0.3.70 dist/prebuilt/olly-molly-darwin-arm64.tar.gz
 ```
 
 for windows:
@@ -322,7 +323,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-prebuilt-windows.ps1
 ```
 
 ```bash
-gh release upload v0.2.21 dist/prebuilt/olly-molly-win32-x64.tar.gz --clobber
+gh release upload v0.3.70 dist/prebuilt/olly-molly-win32-x64.tar.gz --clobber
 ```
 
 ### Project Structure
