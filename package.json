@@ -1,6 +1,6 @@
 {
   "name": "olly-molly",
-  "version": "0.3.70",
+  "version": "0.3.71",
   "description": "Your AI Development Team, Running Locally - Manage AI agents (PM, Frontend, Backend, QA) from a beautiful kanban board",
   "keywords": [
     "ai",
@@ -31,7 +31,8 @@
     "dev": "next dev --port 1234",
     "build": "next build",
     "start": "next start --port 1234 --hostname 0.0.0.0",
-    "lint": "eslint"
+    "lint": "eslint",
+    "deploy:local": "npm run build && bash scripts/deploy-local.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
