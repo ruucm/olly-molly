@@ -38,9 +38,17 @@ if (typeof process !== 'undefined') {
 
 export type AgentProvider = 'claude' | 'opencode' | 'codex';
 
-// ─── OAuth Token (Keychain → file → env) ─────────────────────────────
+// ─── OAuth Token (env → Keychain → file) ─────────────────────────────
 
 function readClaudeCodeToken(): string | null {
+    // Explicit env var takes highest priority
+    if (process.env.ANTHROPIC_API_KEY) {
+        const key = process.env.ANTHROPIC_API_KEY;
+        console.log(`[readClaudeCodeToken] Using ANTHROPIC_API_KEY env var (${key.slice(0, 15)}...${key.slice(-4)}, len=${key.length})`);
+        return key;
+    }
+    console.log(`[readClaudeCodeToken] ANTHROPIC_API_KEY not set, trying Keychain...`);
+
     try {
         const result = execSync(
             'security find-generic-password -s "Claude Code-credentials" -w',
@@ -48,19 +56,29 @@ function readClaudeCodeToken(): string | null {
         );
         const data = JSON.parse(result.trim());
         if (data?.claudeAiOauth?.accessToken) {
-            return data.claudeAiOauth.accessToken;
+            const token = data.claudeAiOauth.accessToken;
+            console.log(`[readClaudeCodeToken] Using Keychain token (${token.slice(0, 15)}...${token.slice(-4)}, len=${token.length})`);
+            return token;
         }
-    } catch {}
+    } catch (e) {
+        console.log(`[readClaudeCodeToken] Keychain failed: ${e instanceof Error ? e.message : e}`);
+    }
 
     try {
         const credPath = path.join(process.env.HOME || '~', '.claude', '.credentials.json');
+        console.log(`[readClaudeCodeToken] Trying credentials file: ${credPath}`);
         const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
         if (raw?.claudeAiOauth?.accessToken) {
-            return raw.claudeAiOauth.accessToken;
+            const token = raw.claudeAiOauth.accessToken;
+            console.log(`[readClaudeCodeToken] Using credentials.json token (${token.slice(0, 15)}...${token.slice(-4)}, len=${token.length})`);
+            return token;
         }
-    } catch {}
+    } catch (e) {
+        console.log(`[readClaudeCodeToken] credentials.json failed: ${e instanceof Error ? e.message : e}`);
+    }
 
-    return process.env.ANTHROPIC_API_KEY || null;
+    console.log(`[readClaudeCodeToken] No token found from any source!`);
+    return null;
 }
 
 // ─── Tool Definitions (sent to Claude API) ───────────────────────────
@@ -218,19 +236,43 @@ interface AnthropicResponse {
 function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse> {
     return new Promise((resolve, reject) => {
         const isOAuth = apiKey.includes('sk-ant-oat');
+
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01',
         };
         if (isOAuth) {
             headers['Authorization'] = `Bearer ${apiKey}`;
-            headers['anthropic-beta'] = 'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14';
+            headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14';
+            headers['user-agent'] = 'claude-cli/2.1.75';
+            headers['x-app'] = 'cli';
         } else {
             headers['x-api-key'] = apiKey;
         }
 
-        const postData = Buffer.from(JSON.stringify(body), 'utf-8');
+        // For OAuth tokens, system prompt must include Claude Code identity
+        // and be in array format with cache_control
+        const bodyObj = { ...(body as Record<string, unknown>) };
+        if (isOAuth) {
+            const originalSystem = bodyObj.system as string || '';
+            bodyObj.system = [
+                {
+                    type: 'text',
+                    text: "You are Claude Code, Anthropic's official CLI for Claude.",
+                    cache_control: { type: 'ephemeral' },
+                },
+                ...(originalSystem ? [{
+                    type: 'text',
+                    text: originalSystem,
+                    cache_control: { type: 'ephemeral' },
+                }] : []),
+            ];
+        }
+
+        const postData = Buffer.from(JSON.stringify(bodyObj), 'utf-8');
         headers['Content-Length'] = String(postData.length);
+
+        console.log(`[callAnthropic] isOAuth=${isOAuth}, model=${bodyObj.model}, bodyLen=${postData.length}`);
 
         const req = https.request({
             hostname: 'api.anthropic.com',
@@ -241,10 +283,20 @@ function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse>
             let data = '';
             res.on('data', (chunk: Buffer) => data += chunk.toString());
             res.on('end', () => {
+                console.log(`[callAnthropic] HTTP ${res.statusCode} | response: ${data.slice(0, 500)}`);
                 try {
-                    resolve(JSON.parse(data));
+                    const parsed = JSON.parse(data);
+                    if (parsed.type === 'error' && parsed.error) {
+                        reject(new Error(`Anthropic API error (${res.statusCode}): [${parsed.error.type}] ${parsed.error.message}`));
+                        return;
+                    }
+                    if (res.statusCode && res.statusCode >= 400) {
+                        reject(new Error(`Anthropic API HTTP ${res.statusCode}: ${data.slice(0, 500)}`));
+                        return;
+                    }
+                    resolve(parsed);
                 } catch {
-                    reject(new Error(`API parse error: ${data.slice(0, 300)}`));
+                    reject(new Error(`API parse error (HTTP ${res.statusCode}): ${data.slice(0, 500)}`));
                 }
             });
         });
@@ -294,7 +346,14 @@ async function runAgentLoop(
         });
 
         if (response.error) {
-            throw new Error(response.error.message);
+            console.error(`[runAgentLoop] API returned error object:`, JSON.stringify(response.error));
+            console.error(`[runAgentLoop] Full response:`, JSON.stringify(response).slice(0, 1000));
+            throw new Error(response.error.message || JSON.stringify(response.error));
+        }
+
+        if (!response.content) {
+            console.error(`[runAgentLoop] No content in response:`, JSON.stringify(response).slice(0, 1000));
+            throw new Error(`Unexpected API response (no content): ${JSON.stringify(response).slice(0, 500)}`);
         }
 
         // Add assistant response to messages
