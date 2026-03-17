@@ -294,16 +294,50 @@ async function validateApiKey(apiKey) {
 }
 
 function tryReadKeychainToken() {
-    try {
-        const result = require('child_process').execSync(
-            'security find-generic-password -s "Claude Code-credentials" -w',
-            { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
-        const data = JSON.parse(result.trim());
-        if (data?.claudeAiOauth?.accessToken) {
-            return data.claudeAiOauth.accessToken;
-        }
-    } catch {}
+    const { execSync: execSyncFn } = require('child_process');
+
+    // macOS Keychain
+    if (process.platform === 'darwin') {
+        try {
+            const result = execSyncFn(
+                'security find-generic-password -s "Claude Code-credentials" -w',
+                { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            const data = JSON.parse(result.trim());
+            if (data?.claudeAiOauth?.accessToken) {
+                return data.claudeAiOauth.accessToken;
+            }
+        } catch {}
+    }
+
+    // Windows Credential Manager
+    if (process.platform === 'win32') {
+        try {
+            const result = execSyncFn(
+                'powershell -NoProfile -Command "[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((Get-StoredCredential -Target \'Claude Code-credentials\' -AsCredentialObject).Password))"',
+                { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            if (result.trim()) {
+                const data = JSON.parse(result.trim());
+                if (data?.claudeAiOauth?.accessToken) {
+                    return data.claudeAiOauth.accessToken;
+                }
+            }
+        } catch {}
+    }
+
+    // Cross-platform: ~/.claude/.credentials.json
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    if (homeDir) {
+        try {
+            const credPath = path.join(homeDir, '.claude', '.credentials.json');
+            const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+            if (raw?.claudeAiOauth?.accessToken) {
+                return raw.claudeAiOauth.accessToken;
+            }
+        } catch {}
+    }
+
     return null;
 }
 
@@ -325,7 +359,9 @@ async function handleSetup(dataDir) {
     const keyOptions = [];
     if (keychainToken) {
         const preview = keychainToken.slice(0, 15) + '...' + keychainToken.slice(-4);
-        keyOptions.push({ key: keychainToken, label: `Claude Code (Keychain): ${preview}` });
+        const storeLabel = process.platform === 'darwin' ? 'Keychain' :
+                           process.platform === 'win32' ? 'Credential Manager' : 'credentials.json';
+        keyOptions.push({ key: keychainToken, label: `Claude Code (${storeLabel}): ${preview}` });
     }
 
     let selectedKey = currentKey;

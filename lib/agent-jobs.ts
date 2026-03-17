@@ -41,43 +41,62 @@ export type AgentProvider = 'claude' | 'opencode' | 'codex';
 // ─── OAuth Token (env → Keychain → file) ─────────────────────────────
 
 function readClaudeCodeToken(): string | null {
-    // Explicit env var takes highest priority
+    // 1. Explicit env var (highest priority, works on all platforms)
     if (process.env.ANTHROPIC_API_KEY) {
         const key = process.env.ANTHROPIC_API_KEY;
-        console.log(`[readClaudeCodeToken] Using ANTHROPIC_API_KEY env var (${key.slice(0, 15)}...${key.slice(-4)}, len=${key.length})`);
+        console.log(`[readClaudeCodeToken] Using ANTHROPIC_API_KEY env var (${key.slice(0, 15)}...${key.slice(-4)})`);
         return key;
     }
-    console.log(`[readClaudeCodeToken] ANTHROPIC_API_KEY not set, trying Keychain...`);
 
-    try {
-        const result = execSync(
-            'security find-generic-password -s "Claude Code-credentials" -w',
-            { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
-        const data = JSON.parse(result.trim());
-        if (data?.claudeAiOauth?.accessToken) {
-            const token = data.claudeAiOauth.accessToken;
-            console.log(`[readClaudeCodeToken] Using Keychain token (${token.slice(0, 15)}...${token.slice(-4)}, len=${token.length})`);
-            return token;
-        }
-    } catch (e) {
-        console.log(`[readClaudeCodeToken] Keychain failed: ${e instanceof Error ? e.message : e}`);
+    // 2. macOS Keychain
+    if (process.platform === 'darwin') {
+        try {
+            const result = execSync(
+                'security find-generic-password -s "Claude Code-credentials" -w',
+                { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            const data = JSON.parse(result.trim());
+            if (data?.claudeAiOauth?.accessToken) {
+                const token = data.claudeAiOauth.accessToken;
+                console.log(`[readClaudeCodeToken] Using macOS Keychain token (${token.slice(0, 15)}...${token.slice(-4)})`);
+                return token;
+            }
+        } catch {}
     }
 
-    try {
-        const credPath = path.join(process.env.HOME || '~', '.claude', '.credentials.json');
-        console.log(`[readClaudeCodeToken] Trying credentials file: ${credPath}`);
-        const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
-        if (raw?.claudeAiOauth?.accessToken) {
-            const token = raw.claudeAiOauth.accessToken;
-            console.log(`[readClaudeCodeToken] Using credentials.json token (${token.slice(0, 15)}...${token.slice(-4)}, len=${token.length})`);
-            return token;
-        }
-    } catch (e) {
-        console.log(`[readClaudeCodeToken] credentials.json failed: ${e instanceof Error ? e.message : e}`);
+    // 3. Windows Credential Manager
+    if (process.platform === 'win32') {
+        try {
+            const result = execSync(
+                'powershell -NoProfile -Command "[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((Get-StoredCredential -Target \'Claude Code-credentials\' -AsCredentialObject).Password))"',
+                { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            if (result.trim()) {
+                const data = JSON.parse(result.trim());
+                if (data?.claudeAiOauth?.accessToken) {
+                    const token = data.claudeAiOauth.accessToken;
+                    console.log(`[readClaudeCodeToken] Using Windows Credential Manager token (${token.slice(0, 15)}...${token.slice(-4)})`);
+                    return token;
+                }
+            }
+        } catch {}
     }
 
-    console.log(`[readClaudeCodeToken] No token found from any source!`);
+    // 4. ~/.claude/.credentials.json (cross-platform)
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    if (homeDir) {
+        try {
+            const credPath = path.join(homeDir, '.claude', '.credentials.json');
+            const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+            if (raw?.claudeAiOauth?.accessToken) {
+                const token = raw.claudeAiOauth.accessToken;
+                console.log(`[readClaudeCodeToken] Using credentials.json token (${token.slice(0, 15)}...${token.slice(-4)})`);
+                return token;
+            }
+        } catch {}
+    }
+
+    console.log(`[readClaudeCodeToken] No token found from any source`);
     return null;
 }
 
@@ -233,10 +252,11 @@ interface AnthropicResponse {
     error?: { message: string };
 }
 
-function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse> {
-    return new Promise((resolve, reject) => {
-        const isOAuth = apiKey.includes('sk-ant-oat');
+const MAX_API_RETRIES = 3;
+const RETRY_STATUS_CODES = [429, 529, 503];
 
+function callAnthropicOnce(apiKey: string, bodyObj: Record<string, unknown>, isOAuth: boolean): Promise<AnthropicResponse> {
+    return new Promise((resolve, reject) => {
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01',
@@ -250,29 +270,8 @@ function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse>
             headers['x-api-key'] = apiKey;
         }
 
-        // For OAuth tokens, system prompt must include Claude Code identity
-        // and be in array format with cache_control
-        const bodyObj = { ...(body as Record<string, unknown>) };
-        if (isOAuth) {
-            const originalSystem = bodyObj.system as string || '';
-            bodyObj.system = [
-                {
-                    type: 'text',
-                    text: "You are Claude Code, Anthropic's official CLI for Claude.",
-                    cache_control: { type: 'ephemeral' },
-                },
-                ...(originalSystem ? [{
-                    type: 'text',
-                    text: originalSystem,
-                    cache_control: { type: 'ephemeral' },
-                }] : []),
-            ];
-        }
-
         const postData = Buffer.from(JSON.stringify(bodyObj), 'utf-8');
         headers['Content-Length'] = String(postData.length);
-
-        console.log(`[callAnthropic] isOAuth=${isOAuth}, model=${bodyObj.model}, bodyLen=${postData.length}`);
 
         const req = https.request({
             hostname: 'api.anthropic.com',
@@ -283,20 +282,24 @@ function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse>
             let data = '';
             res.on('data', (chunk: Buffer) => data += chunk.toString());
             res.on('end', () => {
-                console.log(`[callAnthropic] HTTP ${res.statusCode} | response: ${data.slice(0, 500)}`);
+                console.log(`[callAnthropic] HTTP ${res.statusCode} | response: ${data.slice(0, 300)}`);
                 try {
                     const parsed = JSON.parse(data);
                     if (parsed.type === 'error' && parsed.error) {
-                        reject(new Error(`Anthropic API error (${res.statusCode}): [${parsed.error.type}] ${parsed.error.message}`));
+                        const err = new Error(`Anthropic API error (${res.statusCode}): [${parsed.error.type}] ${parsed.error.message}`);
+                        (err as Error & { statusCode?: number }).statusCode = res.statusCode || 0;
+                        reject(err);
                         return;
                     }
                     if (res.statusCode && res.statusCode >= 400) {
-                        reject(new Error(`Anthropic API HTTP ${res.statusCode}: ${data.slice(0, 500)}`));
+                        const err = new Error(`Anthropic API HTTP ${res.statusCode}: ${data.slice(0, 300)}`);
+                        (err as Error & { statusCode?: number }).statusCode = res.statusCode;
+                        reject(err);
                         return;
                     }
                     resolve(parsed);
                 } catch {
-                    reject(new Error(`API parse error (HTTP ${res.statusCode}): ${data.slice(0, 500)}`));
+                    reject(new Error(`API parse error (HTTP ${res.statusCode}): ${data.slice(0, 300)}`));
                 }
             });
         });
@@ -304,6 +307,48 @@ function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse>
         req.write(postData);
         req.end();
     });
+}
+
+async function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse> {
+    const isOAuth = apiKey.includes('sk-ant-oat');
+
+    // For OAuth tokens, prepend Claude Code identity to system prompt
+    const bodyObj = { ...(body as Record<string, unknown>) };
+    if (isOAuth) {
+        const originalSystem = bodyObj.system as string || '';
+        bodyObj.system = [
+            {
+                type: 'text',
+                text: "You are Claude Code, Anthropic's official CLI for Claude.",
+                cache_control: { type: 'ephemeral' },
+            },
+            ...(originalSystem ? [{
+                type: 'text',
+                text: originalSystem,
+                cache_control: { type: 'ephemeral' },
+            }] : []),
+        ];
+    }
+
+    console.log(`[callAnthropic] isOAuth=${isOAuth}, model=${bodyObj.model}`);
+
+    for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
+        try {
+            return await callAnthropicOnce(apiKey, bodyObj, isOAuth);
+        } catch (err: unknown) {
+            const statusCode = (err as Error & { statusCode?: number }).statusCode || 0;
+            const isRetryable = RETRY_STATUS_CODES.includes(statusCode);
+
+            if (!isRetryable || attempt === MAX_API_RETRIES) {
+                throw err;
+            }
+
+            const delay = Math.min(2000 * Math.pow(2, attempt), 30000);
+            console.log(`[callAnthropic] Retryable error (${statusCode}), attempt ${attempt + 1}/${MAX_API_RETRIES}, waiting ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    throw new Error('Unreachable');
 }
 
 // ─── Agent Loop (Tool Use Loop) ──────────────────────────────────────

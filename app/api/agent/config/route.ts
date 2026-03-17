@@ -16,34 +16,59 @@ function getTokenInfo(): { source: string; preview: string } {
         };
     }
 
-    // 2. Keychain
-    try {
-        const result = execSync(
-            'security find-generic-password -s "Claude Code-credentials" -w',
-            { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
-        const data = JSON.parse(result.trim());
-        if (data?.claudeAiOauth?.accessToken) {
-            const token = data.claudeAiOauth.accessToken;
-            return {
-                source: 'keychain',
-                preview: token.slice(0, 12) + '...' + token.slice(-4),
-            };
-        }
-    } catch {}
+    // 2. macOS Keychain
+    if (process.platform === 'darwin') {
+        try {
+            const result = execSync(
+                'security find-generic-password -s "Claude Code-credentials" -w',
+                { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            const data = JSON.parse(result.trim());
+            if (data?.claudeAiOauth?.accessToken) {
+                const token = data.claudeAiOauth.accessToken;
+                return {
+                    source: 'keychain',
+                    preview: token.slice(0, 12) + '...' + token.slice(-4),
+                };
+            }
+        } catch {}
+    }
 
-    // 3. Credentials file
-    try {
-        const credPath = path.join(process.env.HOME || '~', '.claude', '.credentials.json');
-        const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
-        if (raw?.claudeAiOauth?.accessToken) {
-            const token = raw.claudeAiOauth.accessToken;
-            return {
-                source: 'credentials',
-                preview: token.slice(0, 12) + '...' + token.slice(-4),
-            };
-        }
-    } catch {}
+    // 3. Windows Credential Manager
+    if (process.platform === 'win32') {
+        try {
+            const result = execSync(
+                'powershell -NoProfile -Command "[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((Get-StoredCredential -Target \'Claude Code-credentials\' -AsCredentialObject).Password))"',
+                { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            if (result.trim()) {
+                const data = JSON.parse(result.trim());
+                if (data?.claudeAiOauth?.accessToken) {
+                    const token = data.claudeAiOauth.accessToken;
+                    return {
+                        source: 'credential-manager',
+                        preview: token.slice(0, 12) + '...' + token.slice(-4),
+                    };
+                }
+            }
+        } catch {}
+    }
+
+    // 4. Credentials file (cross-platform)
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    if (homeDir) {
+        try {
+            const credPath = path.join(homeDir, '.claude', '.credentials.json');
+            const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+            if (raw?.claudeAiOauth?.accessToken) {
+                const token = raw.claudeAiOauth.accessToken;
+                return {
+                    source: 'credentials',
+                    preview: token.slice(0, 12) + '...' + token.slice(-4),
+                };
+            }
+        } catch {}
+    }
 
     return { source: 'none', preview: '' };
 }
