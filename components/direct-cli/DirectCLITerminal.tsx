@@ -61,7 +61,7 @@ export function DirectCLITerminal({ messages, isRunning }: DirectCLITerminalProp
     const getMessageTypeClass = (type: Message['message_type']) => {
         switch (type) {
             case 'error':
-                return 'text-muted border-transparent hover:bg-black/5';
+                return 'text-red-300 bg-red-500/10 border-red-500/30';
             case 'success':
                 return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
             case 'system':
@@ -71,9 +71,41 @@ export function DirectCLITerminal({ messages, isRunning }: DirectCLITerminalProp
         }
     };
 
-    const renderLogContent = (raw: string) => {
+    const renderLogContent = (raw: string, isError = false) => {
         const cleaned = stripAnsi(raw);
         const lines = cleaned.split('\n');
+
+        if (isError) {
+            const debugIdx = lines.findIndex(l => l.includes('--- Debug Info ---'));
+            if (debugIdx !== -1) {
+                const mainLines = lines.slice(0, debugIdx);
+                const debugLines = lines.slice(debugIdx);
+                return (
+                    <div className="space-y-2">
+                        <div className="space-y-0.5">
+                            {mainLines.map((line, idx) => (
+                                <div key={idx} className="whitespace-pre-wrap break-words">
+                                    {line}
+                                </div>
+                            ))}
+                        </div>
+                        <details className="mt-2">
+                            <summary className="cursor-pointer text-red-400/70 hover:text-red-300 text-[10px] uppercase tracking-wider select-none">
+                                Debug Info
+                            </summary>
+                            <div className="mt-1 pl-2 border-l-2 border-red-500/30 text-red-400/60 space-y-0.5">
+                                {debugLines.slice(1).map((line, idx) => (
+                                    <div key={idx} className="whitespace-pre-wrap break-words">
+                                        {line}
+                                    </div>
+                                ))}
+                            </div>
+                        </details>
+                    </div>
+                );
+            }
+        }
+
         return (
             <div className="space-y-0.5">
                 {lines.map((line, idx) => {
@@ -127,7 +159,7 @@ export function DirectCLITerminal({ messages, isRunning }: DirectCLITerminalProp
                             key={message.id}
                             className={`rounded-lg border p-2 font-mono text-xs ${getMessageTypeClass(message.message_type)}`}
                         >
-                            {renderLogContent(message.content)}
+                            {renderLogContent(message.content, message.message_type === 'error')}
                         </div>
                     ))
                 )}

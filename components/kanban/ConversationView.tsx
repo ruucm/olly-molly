@@ -147,7 +147,7 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
     const getMessageTypeClass = (type: ConversationMessage['message_type']) => {
         switch (type) {
             case 'error':
-                return 'text-muted border-transparent hover:bg-black/5';
+                return 'text-red-300 bg-red-500/10 border-red-500/30';
             case 'success':
                 return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
             case 'system':
@@ -157,9 +157,42 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
         }
     };
 
-    const renderLogContent = (raw: string) => {
+    const renderLogContent = (raw: string, isError = false) => {
         const cleaned = stripAnsi(raw);
         const lines = cleaned.split('\n');
+
+        // For error messages, split at "--- Debug Info ---" separator
+        if (isError) {
+            const debugIdx = lines.findIndex(l => l.includes('--- Debug Info ---'));
+            if (debugIdx !== -1) {
+                const mainLines = lines.slice(0, debugIdx);
+                const debugLines = lines.slice(debugIdx);
+                return (
+                    <div className="space-y-2">
+                        <div className="space-y-0.5">
+                            {mainLines.map((line, idx) => (
+                                <div key={idx} className="whitespace-pre-wrap break-words">
+                                    {line}
+                                </div>
+                            ))}
+                        </div>
+                        <details className="mt-2">
+                            <summary className="cursor-pointer text-red-400/70 hover:text-red-300 text-[10px] uppercase tracking-wider select-none">
+                                Debug Info
+                            </summary>
+                            <div className="mt-1 pl-2 border-l-2 border-red-500/30 text-red-400/60 space-y-0.5">
+                                {debugLines.slice(1).map((line, idx) => (
+                                    <div key={idx} className="whitespace-pre-wrap break-words">
+                                        {line}
+                                    </div>
+                                ))}
+                            </div>
+                        </details>
+                    </div>
+                );
+            }
+        }
+
         return (
             <div className="space-y-0.5">
                 {lines.map((line, idx) => {
@@ -256,7 +289,7 @@ export function ConversationView({ conversation, messages, isRunning = false, jo
                             key={group.id}
                             className={`rounded-lg border p-2 font-mono text-xs ${getMessageTypeClass(group.type)}`}
                         >
-                            {renderLogContent(group.content)}
+                            {renderLogContent(group.content, group.type === 'error')}
                         </div>
                     ))
                 )}

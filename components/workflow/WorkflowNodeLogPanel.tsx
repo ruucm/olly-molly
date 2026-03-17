@@ -141,7 +141,7 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
   const getMessageTypeStyle = (type: string) => {
     switch (type) {
       case 'error':
-        return 'text-red-400';
+        return 'text-red-300 bg-red-500/10 border-red-500/30';
       case 'success':
         return 'text-green-400';
       case 'system':
@@ -251,22 +251,40 @@ export function WorkflowNodeLogPanel({ ticket, assignees, onClose }: WorkflowNod
           </div>
         ) : (
           <div className="space-y-2">
-            {groupedMessages.map((group) => (
-              <div key={group.id} className={`rounded border border-[var(--border-primary)] p-2 ${getMessageTypeStyle(group.type)}`}>
-                <span className="text-[var(--text-muted)] mr-2 text-[10px]">[{formatTime(group.created_at)}]</span>
-                <div className="mt-1 space-y-0.5">
-                  {stripAnsi(group.content).split('\n').map((line, idx) => {
-                    const kind = classifyLogLine(line);
-                    const lineClass = kind === 'stderr' || kind === 'error' ? 'text-red-300' : '';
-                    return (
-                      <div key={idx} className={`whitespace-pre-wrap break-words ${lineClass}`}>
-                        {line}
-                      </div>
-                    );
-                  })}
+            {groupedMessages.map((group) => {
+              const lines = stripAnsi(group.content).split('\n');
+              const isError = group.type === 'error';
+              const debugIdx = isError ? lines.findIndex(l => l.includes('--- Debug Info ---')) : -1;
+
+              return (
+                <div key={group.id} className={`rounded border border-[var(--border-primary)] p-2 ${getMessageTypeStyle(group.type)}`}>
+                  <span className="text-[var(--text-muted)] mr-2 text-[10px]">[{formatTime(group.created_at)}]</span>
+                  <div className="mt-1 space-y-0.5">
+                    {(debugIdx !== -1 ? lines.slice(0, debugIdx) : lines).map((line, idx) => {
+                      const kind = classifyLogLine(line);
+                      const lineClass = kind === 'stderr' || kind === 'error' ? 'text-red-300' : '';
+                      return (
+                        <div key={idx} className={`whitespace-pre-wrap break-words ${lineClass}`}>
+                          {line}
+                        </div>
+                      );
+                    })}
+                    {debugIdx !== -1 && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-red-400/70 hover:text-red-300 text-[10px] uppercase tracking-wider select-none">
+                          Debug Info
+                        </summary>
+                        <div className="mt-1 pl-2 border-l-2 border-red-500/30 text-red-400/60 space-y-0.5">
+                          {lines.slice(debugIdx + 1).map((line, idx) => (
+                            <div key={idx} className="whitespace-pre-wrap break-words">{line}</div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

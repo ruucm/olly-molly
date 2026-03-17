@@ -576,8 +576,9 @@ async function ensureApiKey(config) {
         return;
     }
 
-    // 2. Already available via env or .env file
-    if (process.env.ANTHROPIC_API_KEY) return;
+    // 2. Already available via env or .env file (must be a real API key, not OAuth token)
+    const existing = process.env.ANTHROPIC_API_KEY;
+    if (existing && !existing.includes('sk-ant-oat')) return;
 
     // 3. Prompt user
     const readline = require('readline');
@@ -646,9 +647,6 @@ async function main() {
         await handleImportDb(args['import-db'], config);
         process.exit(0);
     }
-
-    // Ensure API key is configured
-    await ensureApiKey(config);
 
     // Handle dev mode
     if (config.DEV_MODE) {
@@ -731,6 +729,9 @@ async function main() {
         console.log(`✅ Update complete (v${finalVersion || 'unknown'}). Exiting without starting server.`);
         process.exit(0);
     }
+
+    // Ensure API key is configured (after download/update so .env is stable)
+    await ensureApiKey(config);
 
     const displayHost = config.HOST === '0.0.0.0' ? 'localhost' : config.HOST;
     console.log(`\n🚀 http://${displayHost}:${config.PORT}\n`);

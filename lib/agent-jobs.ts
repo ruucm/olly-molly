@@ -191,9 +191,15 @@ async function executeTool(
 // ─── Anthropic API Call ──────────────────────────────────────────────
 
 interface AnthropicResponse {
+    type?: string;
     content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
     stop_reason: string;
-    error?: { message: string };
+    error?: { type: string; message: string };
+}
+
+function maskApiKey(key: string): string {
+    if (key.length <= 12) return '***';
+    return key.slice(0, 10) + '...' + key.slice(-4);
 }
 
 function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse> {
@@ -213,17 +219,32 @@ function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse>
             method: 'POST',
             headers,
         }, (res) => {
+            const statusCode = res.statusCode || 0;
             let data = '';
             res.on('data', (chunk: Buffer) => data += chunk.toString());
             res.on('end', () => {
                 try {
-                    resolve(JSON.parse(data));
+                    const parsed = JSON.parse(data);
+                    // API returned an error response
+                    if (parsed.type === 'error' && parsed.error) {
+                        const errType = parsed.error.type || 'unknown';
+                        const errMsg = parsed.error.message || 'Unknown error';
+                        const detail = [
+                            `[API Error] ${errType}: ${errMsg}`,
+                            `  HTTP ${statusCode}`,
+                            `  Key: ${maskApiKey(apiKey)}`,
+                            `  Model: ${(body as Record<string, unknown>).model || 'unknown'}`,
+                        ].join('\n');
+                        reject(new Error(detail));
+                        return;
+                    }
+                    resolve(parsed);
                 } catch {
-                    reject(new Error(`API parse error: ${data.slice(0, 300)}`));
+                    reject(new Error(`[API Error] Failed to parse response (HTTP ${statusCode}): ${data.slice(0, 500)}`));
                 }
             });
         });
-        req.on('error', reject);
+        req.on('error', (err) => reject(new Error(`[Network Error] ${err.message}`)));
         req.write(postData);
         req.end();
     });
@@ -267,10 +288,6 @@ async function runAgentLoop(
             tools: AGENT_TOOLS,
             messages,
         });
-
-        if (response.error) {
-            throw new Error(response.error.message);
-        }
 
         // Add assistant response to messages
         messages.push({ role: 'assistant', content: response.content });
@@ -922,7 +939,20 @@ IMPORTANT RULES:
             job.output += `\n[error] ${errorMessage}`;
 
             completeConversation(conversationId, { status: 'failed' });
-            addMessage(conversationId, `❌ Task failed: ${errorMessage}`, 'error');
+
+            // Send detailed error with debug info
+            const debugInfo = [
+                `❌ Task failed`,
+                ``,
+                errorMessage,
+                ``,
+                `--- Debug Info ---`,
+                `Model: ${modelLabel}`,
+                `Key: ${maskApiKey(apiKey)}`,
+                `Project: ${projectPath}`,
+                `Time: ${new Date().toISOString()}`,
+            ].join('\n');
+            addMessage(conversationId, debugInfo, 'error');
 
             appendToWorkLog(projectPath, {
                 agentName,
@@ -1519,7 +1549,18 @@ export async function startDirectCliJob(params: StartDirectCliJobParams): Promis
                 job.status = 'failed';
                 job.output += `\n[error] ${msg}`;
                 completeDirectCliConversation(conversationId, { status: 'failed' });
-                addDirectCliMessage(conversationId, `❌ Execution failed: ${msg}`, 'error');
+                const debugInfo = [
+                    `❌ Execution failed`,
+                    ``,
+                    msg,
+                    ``,
+                    `--- Debug Info ---`,
+                    `Model: ${modelLabel}`,
+                    `Key: ${maskApiKey(apiKey)}`,
+                    `Project: ${projectPath}`,
+                    `Time: ${new Date().toISOString()}`,
+                ].join('\n');
+                addDirectCliMessage(conversationId, debugInfo, 'error');
                 setTimeout(() => { directCliJobs.delete(jobId); }, 60000);
             }
         })();
