@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, execSync, exec } from 'child_process';
+import { spawn, ChildProcess, exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import net from 'net';
@@ -38,28 +38,9 @@ if (typeof process !== 'undefined') {
 
 export type AgentProvider = 'claude' | 'opencode' | 'codex';
 
-// ─── OAuth Token (Keychain → file → env) ─────────────────────────────
+// ─── API Key (env var only — OAuth tokens don't work with api.anthropic.com) ──
 
 function readClaudeCodeToken(): string | null {
-    try {
-        const result = execSync(
-            'security find-generic-password -s "Claude Code-credentials" -w',
-            { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
-        const data = JSON.parse(result.trim());
-        if (data?.claudeAiOauth?.accessToken) {
-            return data.claudeAiOauth.accessToken;
-        }
-    } catch {}
-
-    try {
-        const credPath = path.join(process.env.HOME || '~', '.claude', '.credentials.json');
-        const raw = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
-        if (raw?.claudeAiOauth?.accessToken) {
-            return raw.claudeAiOauth.accessToken;
-        }
-    } catch {}
-
     return process.env.ANTHROPIC_API_KEY || null;
 }
 
@@ -217,17 +198,11 @@ interface AnthropicResponse {
 
 function callAnthropic(apiKey: string, body: object): Promise<AnthropicResponse> {
     return new Promise((resolve, reject) => {
-        const isOAuth = apiKey.includes('sk-ant-oat');
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01',
+            'x-api-key': apiKey,
         };
-        if (isOAuth) {
-            headers['Authorization'] = `Bearer ${apiKey}`;
-            headers['anthropic-beta'] = 'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14';
-        } else {
-            headers['x-api-key'] = apiKey;
-        }
 
         const postData = Buffer.from(JSON.stringify(body), 'utf-8');
         headers['Content-Length'] = String(postData.length);
@@ -836,7 +811,7 @@ async function startClaudeApiJob(params: StartJobParams): Promise<void> {
 
     const apiKey = readClaudeCodeToken();
     if (!apiKey) {
-        throw new Error('Claude Code 인증 토큰을 찾을 수 없습니다. Keychain, ~/.claude/.credentials.json, 또는 ANTHROPIC_API_KEY 환경변수를 확인하세요.');
+        throw new Error('ANTHROPIC_API_KEY가 설정되지 않았습니다. "npx olly-molly --api-key sk-ant-..." 또는 ~/.olly-molly/.env에 설정하세요.');
     }
 
     const modelLabel = getConfiguredModel('claude') || 'claude-sonnet-4-20250514';
@@ -1494,7 +1469,7 @@ export async function startDirectCliJob(params: StartDirectCliJobParams): Promis
 
         const apiKey = readClaudeCodeToken();
         if (!apiKey) {
-            throw new Error('Claude Code 인증 토큰을 찾을 수 없습니다.');
+            throw new Error('ANTHROPIC_API_KEY가 설정되지 않았습니다. "npx olly-molly --api-key sk-ant-..." 또는 ~/.olly-molly/.env에 설정하세요.');
         }
 
         const availablePort = await findAvailablePort(3001);

@@ -21,6 +21,8 @@ const CLI_OPTIONS = {
     // Data/path settings
     'data-dir': { type: 'string', short: 'd' },
     'db-path': { type: 'string' },
+    // API key
+    'api-key': { type: 'string' },
     // Development/debugging
     dev: { type: 'boolean', default: false },
     verbose: { type: 'boolean', short: 'v', default: false },
@@ -70,6 +72,9 @@ DATA/PATH SETTINGS
   -d, --data-dir <path>   App data directory (default: ~/.olly-molly)
       --db-path <path>    Database path (default: <data-dir>/db)
 
+API SETTINGS
+      --api-key <key>     Anthropic API key (saved to ~/.olly-molly/.env)
+
 DEVELOPMENT
       --dev               Run in development mode (next dev)
   -v, --verbose           Enable verbose logging
@@ -90,7 +95,10 @@ ENVIRONMENT VARIABLES
   OLLY_MOLLY_DATA_DIR     App data directory (fallback)
   OLLY_MOLLY_DB_PATH      Database path (fallback)
 
+  ANTHROPIC_API_KEY        Anthropic API key (required for AI agents)
+
   You can also create ~/.olly-molly/.env file:
+    ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
     AWS_REGION=ap-northeast-2
     AWS_ACCESS_KEY_ID=your-key
     AWS_SECRET_ACCESS_KEY=your-secret
@@ -555,6 +563,60 @@ function restoreUserData(backupDir, config) {
     fs.rmSync(backupDir, { recursive: true, force: true });
 }
 
+// Ensure ANTHROPIC_API_KEY exists: CLI arg → env → .env file → prompt user
+async function ensureApiKey(config) {
+    // 1. --api-key flag: save to .env and set in process.env
+    if (args['api-key']) {
+        saveApiKeyToEnv(config.APP_DIR, args['api-key']);
+        process.env.ANTHROPIC_API_KEY = args['api-key'];
+        console.log('✅ API key saved to ~/.olly-molly/.env\n');
+        return;
+    }
+
+    // 2. Already available via env or .env file
+    if (process.env.ANTHROPIC_API_KEY) return;
+
+    // 3. Prompt user
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+    console.log('🔑 Anthropic API key is required to run AI agents.');
+    console.log('   Get one at: https://console.anthropic.com/settings/keys\n');
+
+    const key = await new Promise((resolve) => {
+        rl.question('Enter your API key (sk-ant-...): ', (answer) => {
+            rl.close();
+            resolve(answer.trim());
+        });
+    });
+
+    if (!key) {
+        console.error('❌ No API key provided. Exiting.');
+        process.exit(1);
+    }
+
+    saveApiKeyToEnv(config.APP_DIR, key);
+    process.env.ANTHROPIC_API_KEY = key;
+    console.log('\n✅ API key saved to ~/.olly-molly/.env\n');
+}
+
+function saveApiKeyToEnv(appDir, apiKey) {
+    fs.mkdirSync(appDir, { recursive: true });
+    const envPath = path.join(appDir, '.env');
+
+    if (fs.existsSync(envPath)) {
+        let content = fs.readFileSync(envPath, 'utf8');
+        if (/^ANTHROPIC_API_KEY=.*/m.test(content)) {
+            content = content.replace(/^ANTHROPIC_API_KEY=.*/m, `ANTHROPIC_API_KEY=${apiKey}`);
+        } else {
+            content = `ANTHROPIC_API_KEY=${apiKey}\n${content}`;
+        }
+        fs.writeFileSync(envPath, content);
+    } else {
+        fs.writeFileSync(envPath, `ANTHROPIC_API_KEY=${apiKey}\n`);
+    }
+}
+
 async function main() {
     console.log('\n🐙 Olly Molly\n');
 
@@ -581,6 +643,9 @@ async function main() {
         await handleImportDb(args['import-db'], config);
         process.exit(0);
     }
+
+    // Ensure API key is configured
+    await ensureApiKey(config);
 
     // Handle dev mode
     if (config.DEV_MODE) {
