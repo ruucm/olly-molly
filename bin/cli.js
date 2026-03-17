@@ -662,7 +662,7 @@ async function handleDevMode(config) {
     const server = spawn(npxCmd, ['next', 'dev', '--port', config.PORT, '--hostname', config.HOST], {
         cwd: config.APP_DIR,
         stdio: 'inherit',
-        shell: false,
+        shell: process.platform === 'win32',
     });
 
     server.on('close', (code) => process.exit(code || 0));
@@ -965,18 +965,20 @@ async function main() {
         }, 2000);
     }
 
+    const isWindows = process.platform === 'win32';
+
     let server;
     if (usedPrebuilt) {
         server = spawn('node', [standaloneServerPath], {
             cwd: config.APP_DIR,
             stdio: 'inherit',
             env: { ...process.env, PORT: config.PORT, HOSTNAME: config.HOST },
-            shell: false
+            shell: isWindows
         });
     } else {
-        const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+        const npxCmd = isWindows ? 'npx.cmd' : 'npx';
         server = spawn(npxCmd, ['next', 'start', '--port', config.PORT, '--hostname', config.HOST], {
-            cwd: config.APP_DIR, stdio: 'inherit', shell: false
+            cwd: config.APP_DIR, stdio: 'inherit', shell: isWindows
         });
     }
 
