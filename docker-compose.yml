@@ -1,0 +1,54 @@
+# ===================================
+# Olly Molly Docker Compose
+# Persistent deployment configuration
+# ===================================
+
+services:
+  olly-molly:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: olly-molly
+    ports:
+      - "1234:1234"
+
+    # Volume bindings for data persistence
+    volumes:
+      # SQLite database - persists project data, tickets, conversations
+      - olly-data:/app/db
+
+      # Custom profiles - persists user uploaded profile images
+      - olly-config:/root/.olly-molly
+
+      # Claude Code authentication - persists login session
+      - claude-config:/root/.claude
+
+    environment:
+      - NODE_ENV=production
+      # Optional: Set API key directly (not recommended for security)
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+    # Auto restart unless manually stopped
+    restart: unless-stopped
+
+    # Required for interactive Claude Code login
+    stdin_open: true
+    tty: true
+
+# Named volumes for persistent storage
+# Data survives container removal and recreation
+volumes:
+  # Application database
+  olly-data:
+    driver: local
+    name: olly-molly-data
+
+  # User configuration and custom profiles
+  olly-config:
+    driver: local
+    name: olly-molly-config
+
+  # Claude Code authentication tokens
+  claude-config:
+    driver: local
+    name: olly-molly-claude

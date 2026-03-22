@@ -13,6 +13,7 @@
   <a href="#cli-options">CLI Options</a> •
   <a href="#features">Features</a> •
   <a href="#how-it-works">How It Works</a> •
+  <a href="#docker-deployment">Docker</a> •
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -267,6 +268,74 @@ npm install -g @anthropic-ai/claude-code
 1. Click "Select Project" in the header
 2. Add your project path (e.g., `/Users/you/my-app`)
 3. AI agents will work within that directory
+
+## Docker Deployment
+
+Deploy Olly Molly with Docker Compose for persistent, production-ready deployment.
+
+### Quick Start
+
+```bash
+# Build and start
+docker compose up -d --build
+
+# View logs
+docker compose logs -f
+
+# Open http://localhost:1234
+```
+
+### Persistent Volumes
+
+All data persists across container restarts and removals:
+
+| Volume | Container Path | Purpose |
+|--------|----------------|---------|
+| `olly-molly-data` | `/app/db` | SQLite database (projects, tickets, conversations) |
+| `olly-molly-config` | `/root/.olly-molly` | Custom profile images |
+| `olly-molly-claude` | `/root/.claude` | Claude Code authentication tokens |
+
+### Claude Code Login
+
+Login to Claude Code directly from the container:
+
+```bash
+docker compose exec -it olly-molly claude login
+```
+
+**Steps:**
+1. Run the command above
+2. A URL will be displayed in the terminal
+3. Copy and open the URL in your host browser
+4. Authenticate with your Anthropic account
+5. Return to terminal - login completes automatically
+
+**Verify login:**
+```bash
+docker compose exec olly-molly claude --version
+```
+
+### Container Management
+
+```bash
+# Check container status
+docker compose ps
+
+# Restart container
+docker compose restart
+
+# Stop container (data preserved)
+docker compose stop
+
+# Remove container (volumes preserved)
+docker compose down
+
+# Full reset (removes all data)
+docker compose down -v
+
+# View volume list
+docker volume ls | grep olly-molly
+```
 
 ## Contributing
 
